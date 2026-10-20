@@ -69,7 +69,7 @@ function getCredit(name) {
 const STORAGE_KEY = "morecrafts_position_scale_v2";
 
 function defaultSettings(item) {
-    return {position:item.position.slice(), size:1};
+    return {position:item.position.slice(), size:1, rotation:[0,0,0]};
 }
 
 function validSettings(value, item) {
@@ -78,8 +78,10 @@ function validSettings(value, item) {
         !value.position.every(n => typeof n === "number" && Number.isFinite(n)) ||
         typeof value.size !== "number" || !Number.isFinite(value.size) ||
         value.size <= 0) return defaultSettings(item);
-
-    return {position:value.position.slice(), size:Math.min(value.size,10000)};
+    const rotation = Array.isArray(value.rotation) && value.rotation.length === 3 &&
+        value.rotation.every(n => typeof n === "number" && Number.isFinite(n))
+        ? value.rotation.slice() : [0,0,0];
+    return {position:value.position.slice(), size:Math.min(value.size,10000), rotation};
 }
 
 function readSettings() {
@@ -116,6 +118,7 @@ let applyTimeout = null;
 let editorPanel = null;
 let hideInterval = null;
 let positionInputs = [];
+let rotationInputs = [];
 let sizeInput = null;
 let editorTitle = null;
 let editorStatus = null;
@@ -216,27 +219,32 @@ function refreshEditor() {
         input.value = String(settings.position[i]);
     });
     sizeInput.value = String(settings.size);
+    rotationInputs.forEach((input, i) => {
+        input.value = String((settings.rotation || [0,0,0])[i]);
+    });
     editorStatus.textContent =
         "Position: X " + settings.position[0] +
         " / Y " + settings.position[1] +
         " / Z " + settings.position[2] +
-        " | Scale ×" + settings.size;
+        " | Scale ×" + settings.size +
+        " | Rotation: " + (settings.rotation || [0,0,0]).join(" / ") + "°";
 }
 
 function readEditor() {
     if (!selectedAircraft) return false;
     const position = positionInputs.map(input => Number(input.value));
     const size = Number(sizeInput.value);
+    const rotation = rotationInputs.map(input => Number(input.value));
 
     if (positionInputs.some(input => input.value.trim() === "") ||
+        rotationInputs.some(input => input.value.trim() === "") ||
         sizeInput.value.trim() === "" ||
-        !position.every(Number.isFinite) ||
+        !position.every(Number.isFinite) || !rotation.every(Number.isFinite) ||
         !Number.isFinite(size) || size <= 0 || size > 10000) {
         ui.notification.show("Enter valid numbers. Scale must be above 0.");
         return false;
     }
-
-    SETTINGS[selectedAircraft.base] = {position, size};
+    SETTINGS[selectedAircraft.base] = {position, size, rotation};
     return true;
 }
 
@@ -264,6 +272,18 @@ function createEditor(parent) {
         numberInput(positionRow, "X", 0, "0.1"),
         numberInput(positionRow, "Y", 0, "0.1"),
         numberInput(positionRow, "Z", 0, "0.1")
+    ];
+
+    makeElement("div", "Rotation / Heading (degrees)", editorPanel).style.cssText =
+        "font-size:12px;margin:10px 0 6px;";
+    const rotationRow = makeElement("div", undefined, editorPanel);
+    Object.assign(rotationRow.style, {
+        display:"grid", gridTemplateColumns:"repeat(3,minmax(0,1fr))", gap:"6px"
+    });
+    rotationInputs = [
+        numberInput(rotationRow, "Rotation X (°)", 0, "1"),
+        numberInput(rotationRow, "Rotation Y (°)", 0, "1"),
+        numberInput(rotationRow, "Heading Z (°)", 0, "1")
     ];
 
     const sizeRow = makeElement("div", undefined, editorPanel);
@@ -321,7 +341,7 @@ function createEditor(parent) {
 
     makeElement(
         "p",
-        "Position values use the same units as the original part position. Scale multiplies all three original scale values.",
+        "Position uses original part units. Scale multiplies all original scale values. Rotation X/Y/Z adds degrees to the original model rotation.",
         editorPanel
     ).style.cssText = "font-size:11px;line-height:1.5;opacity:.8;margin:8px 0 0;";
 }
@@ -382,7 +402,7 @@ function loadCustomAircraft(item, reload) {
             ac.addParts([{
                 name:partName,
                 model:item.glb,
-                rotation:item.rotation.slice(),
+                rotation:item.rotation.map((value, i) => value + (settings.rotation || [0,0,0])[i]),
                 position:settings.position.slice(),
                 scale:actualScale
             }]);
