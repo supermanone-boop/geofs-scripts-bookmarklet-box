@@ -1,20 +1,46 @@
-// ==UserScript==
-// @name         GeoFS GEBCO Local Terrain
-// @namespace    geofs-gebco-local-terrain
-// @version      0.1.0
-// @description  Load a local GEBCO GeoTIFF and use it as GeoFS terrain inside its coverage.
-// @match        https://www.geo-fs.com/*
-// @match        https://geo-fs.com/*
-// @run-at       document-idle
-// @require      https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js
-// @grant        none
-// ==/UserScript==
+// GeoFS GEBCO Local Terrain — standalone browser script
+// No Tampermonkey required. GeoTIFF is imported by this file itself.
+// Source data: GEBCO GeoTIFF selected locally by the user.
 
-(() => {
+(async () => {
   'use strict';
+
+  async function loadGeoTIFFAPI() {
+    const cdnUrls = [
+      'https://cdn.jsdelivr.net/npm/geotiff@2.1.3/+esm',
+      'https://esm.sh/geotiff@2.1.3?bundle'
+    ];
+    const errors = [];
+    for (const url of cdnUrls) {
+      try {
+        const mod = await import(url);
+        const candidates = [mod, mod.GeoTIFF, mod.default, mod.default?.GeoTIFF];
+        const api = candidates.find(candidate =>
+          candidate && (typeof candidate.fromBlob === 'function' || typeof candidate.fromArrayBuffer === 'function')
+        );
+        if (api) return api;
+        errors.push(`${url}: module loaded, but fromBlob/fromArrayBuffer was not exported`);
+      } catch (error) {
+        errors.push(`${url}: ${error?.message || error}`);
+      }
+    }
+    throw new Error('GeoTIFFライブラリを読み込めませんでした。CDNへの接続を確認してください。\n' + errors.join('\n'));
+  }
+
+  let GeoTIFFAPI;
+  try {
+    GeoTIFFAPI = await loadGeoTIFFAPI();
+    // Expose only for diagnostics; the add-on uses the validated local reference below.
+    window.GeoTIFF = GeoTIFFAPI;
+  } catch (error) {
+    console.error('[GEBCO] GeoTIFF bootstrap failed:', error);
+    alert('[GEBCO] 起動失敗: ' + (error?.message || error));
+    return;
+  }
 
   const KEY = '__geofsGebcoLocalTerrainV1';
   if (window[KEY]?.restore) window[KEY].restore(false);
+  document.getElementById('geofs-gebco-local-panel')?.remove();
 
   const panel = document.createElement('div');
   panel.id = 'geofs-gebco-local-panel';
@@ -111,10 +137,14 @@
     try {
       const file = fileInput.files?.[0];
       if (!file) throw new Error('Select the .tif file first.');
-      if (!window.GeoTIFF?.fromBlob) throw new Error('GeoTIFF library did not load. Reload the page.');
+      if (typeof GeoTIFFAPI.fromBlob !== 'function' && typeof GeoTIFFAPI.fromArrayBuffer !== 'function') {
+        throw new Error('GeoTIFF API is missing fromBlob/fromArrayBuffer.');
+      }
 
       setStatus(`Reading ${file.name} (${(file.size / 1048576).toFixed(1)} MiB)…`);
-      const tiff = await GeoTIFF.fromBlob(file);
+      const tiff = typeof GeoTIFFAPI.fromBlob === 'function'
+        ? await GeoTIFFAPI.fromBlob(file)
+        : await GeoTIFFAPI.fromArrayBuffer(await file.arrayBuffer());
       const image = await tiff.getImage();
       const width = image.getWidth();
       const height = image.getHeight();
@@ -214,4 +244,7 @@
       applyButton.disabled = false;
     }
   });
-})();
+})().catch(error => {
+  console.error('[GEBCO] Unexpected startup error:', error);
+  alert('[GEBCO] 起動失敗: ' + (error?.message || error));
+});
