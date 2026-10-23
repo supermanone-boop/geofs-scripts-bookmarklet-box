@@ -1,4 +1,4 @@
-// GeoFS GEBCO Local Terrain — standalone browser script
+// GeoFS GEBCO Local Terrain — standalone browser script v3
 // No Tampermonkey required. GeoTIFF is imported by this file itself.
 // Source data: GEBCO GeoTIFF selected locally by the user.
 
@@ -38,7 +38,7 @@
     return;
   }
 
-  const KEY = '__geofsGebcoLocalTerrainV1';
+  const KEY = '__geofsGebcoLocalTerrainV3';
   if (window[KEY]?.restore) window[KEY].restore(false);
   document.getElementById('geofs-gebco-local-panel')?.remove();
 
@@ -162,17 +162,44 @@
 
       setStatus('Connecting to GeoFS terrain…');
       const viewer = await waitForGeoFS();
+      // Patch the exact provider Cesium calls. Patching only baseProvider is insufficient:
+      // GeoFS's wrapper can itself return/resolve undefined before the base provider is reached.
       const wrapper = viewer.terrainProvider;
-      const base = wrapper.baseProvider;
-      if (!base || typeof base.requestTileGeometry !== 'function') {
-        throw new Error('GeoFS base terrain provider not found; original terrain left unchanged.');
+      if (!wrapper || typeof wrapper.requestTileGeometry !== 'function') {
+        throw new Error('GeoFS active terrain provider not found; original terrain left unchanged.');
       }
-      const scheme = base.tilingScheme || wrapper.tilingScheme || new Cesium.GeographicTilingScheme();
-      const originalRequest = base.requestTileGeometry;
+      const provider = wrapper;
+      const scheme = provider.tilingScheme || provider.baseProvider?.tilingScheme || new Cesium.GeographicTilingScheme();
+      const originalRequest = provider.requestTileGeometry;
       const TILE_SIZE = 65;
       const MIN_LEVEL = 5;
 
       // The raster is kept in memory; tiles are sampled only when Cesium requests them.
+      // GeoFS's terrain wrapper may not tolerate Cesium's deferred-request
+      // sentinel (undefined): it can later attempt terrainData.createMesh.
+      // Retry the original provider until it returns a real terrain result.
+      const requestOriginalWithRetry = (receiver, x, y, level, request, attempts = 40) => {
+        const attempt = (remaining) => {
+          let result;
+          try {
+            result = originalRequest.call(receiver, x, y, level, request);
+          } catch (error) {
+            return Promise.reject(error);
+          }
+          // A provider may defer synchronously (undefined) or incorrectly resolve undefined.
+          return Promise.resolve(result).then(terrainData => {
+            if (terrainData !== undefined && terrainData !== null &&
+                typeof terrainData.createMesh === 'function') return terrainData;
+            if (remaining <= 0) {
+              throw new Error(`GeoFS terrain provider returned no valid terrain data after retries (level ${level}, x ${x}, y ${y}).`);
+            }
+            return new Promise(resolve => setTimeout(resolve, 100))
+              .then(() => attempt(remaining - 1));
+          });
+        };
+        return attempt(attempts);
+      };
+
       const patchedRequest = function (x, y, level, request) {
         const rectangle = scheme.tileXYToRectangle(x, y, level);
         const west = Cesium.Math.toDegrees(rectangle.west);
@@ -181,7 +208,7 @@
         const north = Cesium.Math.toDegrees(rectangle.north);
         const intersects = east > bounds.west && west < bounds.east && north > bounds.south && south < bounds.north;
         if (level < MIN_LEVEL || !intersects) {
-          return originalRequest.call(this, x, y, level, request);
+          return requestOriginalWithRetry(provider, x, y, level, request);
         }
 
         const fullyCovered = west >= bounds.west && east <= bounds.east && south >= bounds.south && north <= bounds.north;
@@ -209,17 +236,15 @@
         };
 
         if (fullyCovered) return Promise.resolve(makeHeightmap(null));
-        const fallbackRequest = originalRequest.call(this, x, y, level, request);
-        if (!fallbackRequest) return undefined; // Let Cesium retry a throttled tile request.
-        return Promise.resolve(fallbackRequest).then(makeHeightmap);
+        return requestOriginalWithRetry(provider, x, y, level, request).then(makeHeightmap);
       };
 
       if (window[KEY]?.installed) restore(false);
-      base.requestTileGeometry = patchedRequest;
+      provider.requestTileGeometry = patchedRequest;
       window[KEY] = {
-        viewer, wrapper, base, originalRequest,
+        viewer, wrapper, provider, originalRequest,
         restore: (refresh = true) => {
-          base.requestTileGeometry = originalRequest;
+          provider.requestTileGeometry = originalRequest;
           if (refresh) refreshTerrain(viewer, wrapper);
           delete window[KEY];
           setStatus('Original terrain request method restored.');
@@ -235,8 +260,8 @@
     } catch (error) {
       console.error('[GEBCO] Add-on failed:', error);
       const active = window[KEY];
-      if (active?.installed && active.base && active.originalRequest) {
-        try { active.base.requestTileGeometry = active.originalRequest; } catch (_) {}
+      if (active?.installed && active.provider && active.originalRequest) {
+        try { active.provider.requestTileGeometry = active.originalRequest; } catch (_) {}
         delete window[KEY];
       }
       setStatus(`Failed: ${error?.message || error}\nThe terrain hook was rolled back where possible. Check the console for details.`);
