@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "GeoFS Rail Tracker",
+  "version": "0.1.1",
+  "description": "Place GLB models in GeoFS and update their positions from a JSON vehicle-position feed.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.geo-fs.com/*",
+        "https://geo-fs.com/*",
+        "https://*.geo-fs.com/*"
+      ],
+      "js": ["rail-tracker.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}
