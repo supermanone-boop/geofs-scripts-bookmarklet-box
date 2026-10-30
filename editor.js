@@ -664,13 +664,15 @@ export class Editor {
     const padB = 26;
     const w = this.W - padL - padR;
     const h = this.H - padT - padB;
-    const Hmax = H_MAX;
+    const heights = this.design && Array.isArray(this.design.hs) ? this.design.hs : [];
+    const currentMax = heights.reduce((m, v) => Number.isFinite(v) ? Math.max(m, v) : m, 2);
+    const Hmax = Math.max(60, Math.ceil((currentMax + 20) / 10) * 10);
     return {
-      x0: padL, y0: padT, w, h,
+      x0: padL, y0: padT, w, h, Hmax,
       ux: (u) => padL + u * w,
       hy: (hh) => padT + h - (hh / Hmax) * h,
       toU: (sx) => clamp((sx - padL) / w, 0, 1),
-      toH: (sy) => clamp(((padT + h - sy) / h) * Hmax, H_MIN, H_MAX),
+      toH: (sy) => clamp(((padT + h - sy) / h) * Hmax, H_MIN, Hmax),
     };
   }
 
@@ -1010,7 +1012,8 @@ export class Editor {
     c.font = `600 10px ${FONT}`;
     c.textAlign = 'right';
     c.textBaseline = 'middle';
-    for (let h = 0; h <= H_MAX; h += 10) {
+    const hStep = Math.max(10, Math.ceil(X.Hmax / 6 / 10) * 10);
+    for (let h = 0; h <= X.Hmax; h += hStep) {
       const y = X.hy(h);
       c.beginPath();
       c.moveTo(X.x0, y);

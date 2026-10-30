@@ -1,6 +1,6 @@
 // codec.js — 設計（上から描いた道・高さ・しかけ・設定）を、URL に載せる短い文字列にする・戻す
 // 同じ文字列からは同じ線路・同じ結果になる（シミュレーションは決まった種の乱数で動く）。
-// 形：1 バイト目が版。数は 0.5 m 単位に丸める。点は前の点との差を可変長の整数で詰める。
+// 形：1 バイト目が版。高さは v3 で Float32、旧 v1/v2 の高さデータも読み込める。点は差分を可変長整数で保存する。
 // 点の後ろに装飾（見た目）の 2 バイト（線路の色・車両の色 / 乗る人・景色 を 3 ビットずつ）。
 // 装飾は後から足したので、無ければ今の見た目にする（古いリンクも開け、古い版のゲームは余りを読まない）。
 // その後ろにマップの 1 バイト（1.1.1 で足した。無ければいつもの遊園地）、
@@ -8,12 +8,26 @@
 import { H_SAMPLES, H_MAX, H_MIN, FIELD, GIMMICK_KEYS, MATS, BARS, STARTS, MAX_GIMMICKS, MAX_CARS, MAPS } from './track.js';
 import { cleanLook, defaultLook } from './looks.js';
 
-const VER = 2;
+const VER = 3;
 const MAX_POINTS = 8192;
 const MAX_CODE_LENGTH = 180000;
 const OX_V1 = 80; // 旧共有URLの座標オフセット
 const OX_V2 = 601; // 拡張敷地 -600..600m を収める新オフセット
 
+function pushFloat32(out, value) {
+  let v = Number(value);
+  if (!Number.isFinite(v)) v = H_MIN;
+  v = Math.max(H_MIN, Math.min(3.4e38, v));
+  const buffer = new ArrayBuffer(4);
+  new DataView(buffer).setFloat32(0, v, true);
+  for (const byte of new Uint8Array(buffer)) out.push(byte);
+}
+function readFloat32(r) {
+  if (r.i + 4 > r.b.length) throw new Error('short');
+  const value = new DataView(r.b.buffer, r.b.byteOffset + r.i, 4).getFloat32(0, true);
+  r.i += 4;
+  return Number.isFinite(value) ? Math.max(H_MIN, value) : H_MIN;
+}
 function b64(bytes) {
   let s = '';
   for (const b of bytes) s += String.fromCharCode(b);
@@ -92,7 +106,7 @@ export function encode(d) {
     const u = Math.round(Math.min(1, Math.max(0, g.u)) * 4095);
     out.push(GIMMICK_KEYS.indexOf(g.t), u >> 8, u & 255);
   }
-  for (let k = 0; k < H_SAMPLES; k++) out.push(Math.round(Math.min(H_MAX, Math.max(H_MIN, d.hs[k] ?? 2)) * 2));
+  for (let k = 0; k < H_SAMPLES; k++) pushFloat32(out, d.hs?.[k] ?? 2);
   const pts = d.pts.slice(0, MAX_POINTS);
   out.push(pts.length >> 8, pts.length & 255);
   let px = 0;
@@ -123,7 +137,7 @@ export function decode(str) {
       return b[r.i++];
     };
     const version = rd();
-    if (version !== 1 && version !== VER) return null;
+    if (version !== 1 && version !== 2 && version !== VER) return null;
     const offset = version === 1 ? OX_V1 : OX_V2;
     const f = rd();
     const d = { mat: f & 3, bar: (f >> 2) & 3, start: (f >> 4) & 3, cars: rd(), gm: [], hs: [], pts: [] };
@@ -137,7 +151,11 @@ export function decode(str) {
       if (!t) return null;
       d.gm.push({ t, u });
     }
-    for (let k = 0; k < H_SAMPLES; k++) d.hs.push(Math.min(H_MAX, Math.max(H_MIN, rd() / 2)));
+    if (version >= 3) {
+      for (let k = 0; k < H_SAMPLES; k++) d.hs.push(readFloat32(r));
+    } else {
+      for (let k = 0; k < H_SAMPLES; k++) d.hs.push(Math.max(H_MIN, rd() / 2));
+    }
     const n = (rd() << 8) | rd();
     if (n < 2 || n > MAX_POINTS) return null;
     let px = 0;

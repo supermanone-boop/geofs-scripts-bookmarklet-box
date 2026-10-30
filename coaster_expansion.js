@@ -1,4 +1,4 @@
-/* Coaster Expansion v2.0
+/* Coaster Expansion v3.0
  * Loaded by the game's main.js. Adds tools inside the native editor UI.
  * GLB/glTF importer supports triangle meshes, PBR base color/metal/roughness,
  * transforms and base-color textures. Skins, morph targets and animation are not imported.
