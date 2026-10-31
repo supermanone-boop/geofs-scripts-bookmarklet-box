@@ -1,5 +1,5 @@
-/* Coaster City District + Flight Simulator v2.1
- * Wide non-intersecting city blocks, mountain ranges, and the requested GeoFS aircraft.
+/* Coaster City District + Flight Simulator v3.0
+ * Asphalt city ground, road traffic, close-but-clear buildings, and an original procedural jet.
  * Built for the Three.js runtime used by the original coaster game.
  */
 export function installCityFlight(api, editor, panel) {
@@ -24,7 +24,8 @@ export function installCityFlight(api, editor, panel) {
     glassLit: new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.24, metalness: 0.18, emissive: 0xffbd70, emissiveIntensity: 0.9 }),
     trim: new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.48, metalness: 0.62 }),
     dark: new T.MeshStandardMaterial({ color: 0x242c35, roughness: 0.7 }),
-    asphalt: new T.MeshStandardMaterial({ color: 0x292f35, roughness: 0.96 }),
+    asphalt: new T.MeshStandardMaterial({ color: 0x30363b, roughness: 0.96 }),
+    ground: new T.MeshStandardMaterial({ color: 0x777d80, roughness: 0.99, metalness: 0.0 }),
     roadMark: new T.MeshStandardMaterial({ color: 0xe7e0bd, roughness: 0.8, emissive: 0x29251a, emissiveIntensity: 0.15 }),
     greenery: new T.MeshStandardMaterial({ color: 0x4b7952, roughness: 1 }),
     leaf: new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94 }),
@@ -35,7 +36,7 @@ export function installCityFlight(api, editor, panel) {
   const batchDefs = {
     concrete: materials.concrete, facade: materials.facade, glass: materials.glass,
     glassLit: materials.glassLit, trim: materials.trim, dark: materials.dark,
-    asphalt: materials.asphalt, roadMark: materials.roadMark, greenery: materials.greenery,
+    asphalt: materials.asphalt, ground: materials.ground, roadMark: materials.roadMark, greenery: materials.greenery,
     leaf: materials.leaf, warm: materials.warm, runway: materials.runway, roof: materials.roof,
   };
   let cityRoot = null;
@@ -43,7 +44,6 @@ export function installCityFlight(api, editor, panel) {
   let mountainRoot = null;
   let mountainConfig = null;
   let mountainClock = 0;
-  const AIRCRAFT_GLB_URL = 'https://www.geo-fs.com/backend/aircraft/repository/M135_267286_5229/f3-7.glb';
   let routeCache = null;
   let colliders = [];
   let traffic = [];
@@ -61,6 +61,7 @@ export function installCityFlight(api, editor, panel) {
   let oldFog = null;
   let oldFar = null;
   let cityBuildCount = 0;
+  const FLIGHT_GROUND_ALT = 3.20;
   const SIGN_WORDS = ['HOTEL','MALL','PLAZA','MARKET','OFFICE','CAFE','BANK','SKY','GALLERY','ARCADE','TOWER','METRO'];
   const signTextures = new Map();
   const signMaterials = new Map();
@@ -239,25 +240,60 @@ export function installCityFlight(api, editor, panel) {
     if (opts.collider !== false) colliders.push({x:frame.x,z:frame.z,yaw:frame.yaw,cx:opts.cx||0,cz:opts.cz||0,halfW:w/2,halfD:d/2,minY:baseY,maxY:baseY+h,kind:'building'});
     return {w,d,h,baseY};
   }
-  function addRoads(B, frame, step, groundY = 0) {
-    // The central 60m corridor is reserved exclusively for the coaster.
-    for(const side of [-1,1]){
-      const x=side*42;
-      B.local(frame,'asphalt',x,groundY-.34,0,9.2,.55,step+3,0x30383d);
-      B.local(frame,'trim',x+side*5.1,groundY-.12,0,1.15,.35,step+3,0x9b9c91);
-      for(let z=-step/2+4;z<step/2;z+=10) B.local(frame,'roadMark',x,groundY-.04,z,.18,.08,4.2,0xe8dfbd);
-      B.local(frame,'roadMark',x-side*3.1,groundY-.025,0,.12,.05,step,0xb3b6ad);
-      B.local(frame,'trim',x-side*5.1,groundY-.06,0,.65,.24,step+2,0x6c7978);
+  const CITY_ROAD_WIDTH = 9.5;
+  function getRoadOffsets(rows, half) {
+    const centers = rows.map(row => half * row.f);
+    const offsets = [12.5];
+    for (let i = 0; i < centers.length - 1; i++) {
+      const mid = (centers[i] + centers[i + 1]) * 0.5;
+      if (mid > 48 && mid < half - 24) offsets.push(mid);
+    }
+    if (centers.length && centers[centers.length - 1] < half - 80) {
+      offsets.push((centers[centers.length - 1] + half - 24) * 0.5);
+    }
+    return [...new Set(offsets.map(v => Math.round(v / 2) * 2))].sort((a,b)=>a-b);
+  }
+  function buildingClearOfRoads(lateral, width, roadOffsets) {
+    const pad = width * 0.5 + CITY_ROAD_WIDTH * 0.5 + 2.0;
+    return roadOffsets.every(offset => Math.abs(Math.abs(lateral) - offset) >= pad);
+  }
+  function addRoads(B, frame, step, groundY, areaWidth, roadOffsets, crossStreet = false) {
+    // Continuous matte-grey city pavement under every street and building block.
+    B.local(frame, 'ground', 0, groundY - 0.35, 0, areaWidth + 160, 0.70, step + 24, 0x777d80);
+    for (const side of [-1, 1]) {
+      for (const offset of roadOffsets) {
+        B.local(frame, 'asphalt', side * offset, groundY - 0.28, 0, CITY_ROAD_WIDTH, 0.56, step + 8, 0x30363b);
+        // Concrete curb and pale edge lines.
+        for (const edge of [-1, 1]) {
+          B.local(frame, 'trim', side * offset + edge * (CITY_ROAD_WIDTH * 0.5 + 0.8), groundY - 0.13, 0, 0.8, 0.28, step + 9, 0x9da2a3);
+          B.local(frame, 'roadMark', side * offset + edge * 4.15, groundY + 0.015, 0, 0.15, 0.05, step + 2, 0xe5e2d5);
+        }
+        // Broken centre line, with the same local coordinate used by traffic.
+        for (let z = -step * 0.5 + 4; z < step * 0.5; z += 13) {
+          B.local(frame, 'roadMark', side * offset, groundY + 0.018, z, 0.22, 0.05, 5.0, 0xe7dcae);
+        }
+      }
+      if (crossStreet && roadOffsets.length > 1) {
+        const inner = roadOffsets[0], outer = roadOffsets[roadOffsets.length - 1];
+        B.local(frame, 'asphalt', side * ((inner + outer) * 0.5), groundY - 0.275, 0,
+          outer - inner + CITY_ROAD_WIDTH, 0.55, 13.5, 0x30363b);
+        B.local(frame, 'roadMark', side * ((inner + outer) * 0.5), groundY + 0.02, 0,
+          outer - inner + CITY_ROAD_WIDTH - 2, 0.05, 0.18, 0xe5e2d5);
+        // Short zebra crossing at the main boulevard.
+        for (let k = -4; k <= 4; k++) {
+          B.local(frame, 'roadMark', side * (inner + 9 + k * 1.6), groundY + 0.025, 0, 0.75, 0.05, 3.0, 0xf0eee4);
+        }
+      }
     }
   }
-  function routeSamples(tr, limit = 2400) {
+  function routeSamples(tr, limit = 1800) {
     const stride = Math.max(1, Math.floor(tr.n / limit));
     const out=[];
     for(let i=0;i<tr.n;i+=stride) out.push({x:tr.px[i],z:tr.pz[i]});
     out.push({x:tr.px[tr.n-1],z:tr.pz[tr.n-1]});
     return out;
   }
-  function buildingClearOfRoute(frame,w,d,samples,clearance=24) {
+  function buildingClearOfRoute(frame,w,d,samples,clearance=8) {
     const c=Math.cos(frame.yaw),sn=Math.sin(frame.yaw),hw=w/2+clearance,hd=d/2+clearance;
     for(const p of samples){
       const dx=p.x-frame.x,dz=p.z-frame.z;
@@ -279,25 +315,25 @@ export function installCityFlight(api, editor, panel) {
     const x = bounds.maxX + 450;
     const z = center.z + 110;
     // Runway and threshold, long axis is +Z.
-    B.add('runway',x,-.72,z,48,.55,1800,0,0x343a3e);
-    B.add('trim',x-25,-.25,z,1,.45,1800,0,0x8a969b);
-    B.add('trim',x+25,-.25,z,1,.45,1800,0,0x8a969b);
-    for(let zz=-870;zz<=870;zz+=15) B.add('roadMark',x,-.35,z+zz,0.65,.12,7,0,0xf5f1df);
+    B.add('runway',x,-.225,z,48,.55,1800,0,0x343a3e);
+    B.add('trim',x-25,.12,z,1,.14,1800,0,0x8a969b);
+    B.add('trim',x+25,.12,z,1,.14,1800,0,0x8a969b);
+    for(let zz=-870;zz<=870;zz+=15) B.add('roadMark',x,.095,z+zz,0.65,.08,7,0,0xf5f1df);
     for(const side of [-1,1]){
       for(let j=0;j<10;j++){
-        B.add('roadMark',x+side*20,-.32,z-870+j*2.2,1.4,.12,1.3,0,0xffffff);
+        B.add('roadMark',x+side*20,.095,z-870+j*2.2,1.4,.08,1.3,0,0xffffff);
       }
-      for(let j=0;j<30;j++) B.add('warm',x+side*24,-.08,z-840+j*58,.7,.5,.7,0,side<0?0x32d6ff:0xff5544);
+      for(let j=0;j<30;j++) B.add('warm',x+side*24,.24,z-840+j*58,.7,.5,.7,0,side<0?0x32d6ff:0xff5544);
     }
-    B.add('asphalt',x-52,-.56,z+20,58,.5,110,0,0x333a40);
+    B.add('asphalt',x-52,-.18,z+20,58,.46,110,0,0x333a40);
     // Apron and terminal.
     const terminalFrame={x:x-100,y:0,z:z+40,yaw:Math.PI/2};
-    makeBuilding(B,root,terminalFrame,0x713a,{w:62,d:92,h:26,cx:0,cz:0,baseY:0});
+    makeBuilding(B,root,terminalFrame,0x713a,{w:62,d:92,h:26,cx:0,cz:0,baseY:.05});
     const hangarFrame={x:x+65,y:0,z:z+50,yaw:Math.PI/2};
-    makeBuilding(B,root,hangarFrame,0x882d,{w:58,d:70,h:22,cx:0,cz:0,baseY:0});
+    makeBuilding(B,root,hangarFrame,0x882d,{w:58,d:70,h:22,cx:0,cz:0,baseY:.05});
     // Taxiway centerline.
-    B.add('roadMark',x-56,-.2,z+5,1,.12,76,Math.PI/2,0xe9dc91);
-    return {x,z,runwayHalfLength:900,spawn:{x,z:z-760,y:2.4,yaw:0}};
+    B.add('roadMark',x-56,.13,z+5,1,.08,76,Math.PI/2,0xe9dc91);
+    return {x,z,runwayHalfLength:900,spawn:{x,z:z-760,y:FLIGHT_GROUND_ALT,yaw:0}};
   }
   function makeCity(config = {}) {
     if(cityRoot) disposeCity();
@@ -317,81 +353,103 @@ export function installCityFlight(api, editor, panel) {
     }
     const center={x:(minX+maxX)/2,z:(minZ+maxZ)/2,y:frames.reduce((sum,f)=>sum+f.y,0)/frames.length};
     const density=config.density||'dense';
-    const areaWidth=clamp(Number(config.areaWidth)||8000,2400,12000);
+    const areaWidth=clamp(Number(config.areaWidth)||10000,3000,16000);
     const half=areaWidth/2;
     const seedBase=config.seed||20261031;
-    const samples=routeSamples(tr,900);
+    const samples=routeSamples(tr,2400);
+    // First row is intentionally close to the ride. Roads occupy the gaps between rows.
     const rows=density==='normal'
-      ? [{f:.025,every:1},{f:.10,every:2},{f:.25,every:3},{f:.52,every:4},{f:.82,every:5}]
+      ? [{f:.014,every:1},{f:.065,every:2},{f:.14,every:2},{f:.27,every:3},{f:.44,every:3},{f:.64,every:4},{f:.84,every:5}]
       : density==='ultra'
-        ? [{f:.02,every:1},{f:.045,every:1},{f:.085,every:1},{f:.17,every:2},{f:.31,every:2},{f:.52,every:3},{f:.77,every:4}]
-        : [{f:.025,every:1},{f:.055,every:1},{f:.12,every:2},{f:.24,every:2},{f:.43,every:3},{f:.68,every:4}];
+        ? [{f:.0085,every:1},{f:.028,every:1},{f:.055,every:1},{f:.105,every:2},{f:.18,every:2},{f:.29,every:2},{f:.43,every:3},{f:.60,every:3},{f:.78,every:4},{f:.90,every:5}]
+        : [{f:.0085,every:1},{f:.035,every:1},{f:.075,every:2},{f:.14,every:2},{f:.23,every:2},{f:.36,every:3},{f:.53,every:3},{f:.72,every:4},{f:.89,every:5}];
+    const roadOffsets=getRoadOffsets(rows,half);
+    const groundY=.05;
     for(let i=0;i<frames.length;i++){
       const f=frames[i],seed=seedBase+i*179,r=rand(seed);
-      const groundY=-.8;
-      addRoads(B,f,step,groundY);
-      // Sidewalks, low walls, trees and street furniture stay outside the reserved rail corridor.
+      const crossStreet=i%8===3;
+      addRoads(B,f,step,groundY,areaWidth,roadOffsets,crossStreet);
+      // Street furniture and trees are placed outside the protected ride corridor.
       for(const side of [-1,1]){
-        for(let q=0;q<2;q++){
-          const zz=(q-.5)*step*.54;
-          if((i+q)%2===0) addStreetTree(B,f,side*55,zz,5.8,seed+q*33,groundY);
-        }
-        const lp=worldFromLocal(f,side*54,0);
+        if(i%2===0) addStreetTree(B,f,side*31,(i%3-1)*step*.18,5.8,seed+side*33,groundY);
+        const lp=worldFromLocal(f,side*29,0);
         B.add('trim',lp.x,groundY+5.2,lp.z,.22,10.4,.22,f.yaw,0x56616a);
         B.add('trim',lp.x+Math.cos(f.yaw)*1.8,groundY+10.25,lp.z-Math.sin(f.yaw)*1.8,3.8,.18,.22,f.yaw,0x65717a);
         B.add('warm',lp.x+Math.cos(f.yaw)*1.8,groundY+10,lp.z-Math.sin(f.yaw)*1.8,1.4,.25,.5,f.yaw,0xffdda3);
-        // Multiple rows make a broad urban district rather than a thin strip beside the ride.
+        // Leave a full cross-street slot clear of buildings every eight blocks.
+        if(crossStreet) continue;
         for(let row=0;row<rows.length;row++){
           const def=rows[row];
           if(i%def.every!==0) continue;
-          const alongJitter=(r()-.5)*step*.16;
-          const lateral=half*def.f + (r()-.5)*Math.min(16,half*.012);
-          const w=(row<2?24:30)+r()*(row<2?14:26);
-          const d=clamp(step*(row<2?.72:.66),28,74)*(.88+r()*.22);
+          const alongJitter=(r()-.5)*step*.12;
+          const lateral=half*def.f + (r()-.5)*Math.min(10,half*.006);
+          const w=(row<3?22:28)+r()*(row<3?13:24);
+          const d=clamp(step*(row<3?.62:.58),25,66)*(.9+r()*.18);
+          if(!buildingClearOfRoads(lateral,w,roadOffsets)) continue;
           const p=worldFromLocal(f,side*lateral,alongJitter);
           const bf={x:p.x,y:f.y,z:p.z,yaw:f.yaw};
-          // Check the complete route, including high sections and tight bends, before committing a building.
-          if(!buildingClearOfRoute(bf,w,d,samples,48)) continue;
+          // Keep a compact 12m surface-to-centreline safety gap; never bridge or cross the rail.
+          if(!buildingClearOfRoute(bf,w,d,samples,8)) continue;
           if(!buildingClearOfBuildings(bf,w,d)) continue;
-          const baseHeight=32+r()*(row<2?90:170);
+          const baseHeight=36+r()*(row<3?115:190);
           const routeHeight=Math.max(0,f.y);
-          const rise=row<2?35+r()*85:65+r()*190;
+          const rise=row<3?38+r()*95:70+r()*230;
           const h=Math.max(baseHeight,routeHeight+rise);
           makeBuilding(B,root,bf,seed+side*31+row*809,{w,d,h,baseY:groundY,collider:true});
-          // Add an illuminated podium canopy for selected buildings; these remain inside the same footprint.
           if(row<2 && r()>.55){
             B.local(f,'trim',side*lateral,groundY+3.6,alongJitter,w+2,.45,d*.72,0x71858b);
             B.local(f,'warm',side*lateral,groundY+3.9,alongJitter,w*.72,.13,d*.55,0xffd28e);
           }
         }
       }
-      // A small pocket plaza appears between some outer blocks.
       if(i%3===0){
         for(const side of [-1,1]){
-          const p=worldFromLocal(f,side*(half*.93),0);
-          B.add('greenery',p.x,groundY-.45,p.z,22,.28,step*.65,f.yaw,0x506c4c);
-          for(let t=0;t<3;t++) addStreetTree(B,f,side*(half*.91),(t-1)*7,6.5,seed+i+t,groundY);
+          const p=worldFromLocal(f,side*(half*.94),0);
+          B.add('greenery',p.x,groundY-.43,p.z,24,.26,step*.6,f.yaw,0x506c4c);
+          for(let t=0;t<3;t++) addStreetTree(B,f,side*(half*.92),(t-1)*7,6.5,seed+i+t,groundY);
         }
       }
     }
     const bounds={minX,minZ,maxX,maxZ};
     const airport=addAirport(B,root,bounds,center);
     B.finish();
-    // Traffic stays on the two roads well clear of the coaster.
-    for(let i=0;i<12;i++){
-      const color=[0xb93f3b,0xe3e5e2,0x3f6f9a,0xd5a849,0x2d343a][i%5];
-      const car=new T.Group();
-      const body=new T.Mesh(new T.BoxGeometry(2.2,.75,4.6),new T.MeshStandardMaterial({color,roughness:.48,metalness:.25}));body.position.y=.8;car.add(body);
-      const cabin=new T.Mesh(new T.BoxGeometry(1.7,.7,2.1),new T.MeshStandardMaterial({color:0x70909e,roughness:.16,metalness:.22}));cabin.position.set(0,1.45,-.15);car.add(cabin);
+    // Vehicles are placed in the exact road lanes, with opposing traffic and rotating wheels.
+    const carPaint=[0xb93f3b,0xe3e5e2,0x3f6f9a,0xd5a849,0x2d343a,0x597d69,0x7d7194];
+    const carGlass=new T.MeshStandardMaterial({color:0x54717d,roughness:.18,metalness:.2});
+    const tireMat=new T.MeshStandardMaterial({color:0x171b1e,roughness:.86});
+    const hubMat=new T.MeshStandardMaterial({color:0x9aa4a9,metalness:.72,roughness:.3});
+    const headMat=new T.MeshBasicMaterial({color:0xfff1c8});
+    const tailMat=new T.MeshBasicMaterial({color:0xff362b});
+    const trafficCount=clamp(Math.round(total/95),24,48);
+    for(let i=0;i<trafficCount;i++){
+      const paint=new T.MeshStandardMaterial({color:carPaint[i%carPaint.length],roughness:.48,metalness:.22});
+      const car=new T.Group();car.name=`CityTraffic_${i+1}`;
+      const van=i%7===5;
+      const body=new T.Mesh(new T.BoxGeometry(van?2.45:2.25,.78,van?5.5:4.7),paint);body.position.y=.76;car.add(body);
+      const hood=new T.Mesh(new T.BoxGeometry(2.12,.30,1.25),paint);hood.position.set(0,1.06,1.52);car.add(hood);
+      const cabin=new T.Mesh(new T.BoxGeometry(van?2.05:1.78,van?1.05:.78,van?2.85:2.35),carGlass);cabin.position.set(0,1.42,-.28);car.add(cabin);
+      const roof=new T.Mesh(new T.BoxGeometry(van?2.0:1.72,.13,van?2.65:2.15),paint);roof.position.set(0,1.98,-.32);car.add(roof);
+      for(const side of [-1,1]){
+        for(const z of [-1.25,.95]){
+          const lamp=new T.Mesh(new T.BoxGeometry(.10,.22,.32),z>0?headMat:tailMat);lamp.position.set(side*.94,.74,z>0?2.27:-2.27);car.add(lamp);
+        }
+      }
       const wheels=[];
-      for(const x of [-1.05,1.05])for(const z of [-1.45,1.45]){const w=new T.Mesh(new T.CylinderGeometry(.42,.42,.24,12),new T.MeshStandardMaterial({color:0x171b1e,roughness:.8}));w.rotation.z=Math.PI/2;w.position.set(x,.42,z);car.add(w);wheels.push(w);}
-      root.add(car);traffic.push({group:car,s:(i/12)*total,side:i%2?1:-1,speed:7+i%4});
+      for(const x of [-1.12,1.12])for(const z of [-1.52,1.52]){
+        const w=new T.Mesh(new T.CylinderGeometry(.43,.43,.23,14),tireMat);w.rotation.z=Math.PI/2;w.position.set(x,.42,z);car.add(w);wheels.push(w);
+        const hub=new T.Mesh(new T.CylinderGeometry(.19,.19,.245,12),hubMat);hub.rotation.z=Math.PI/2;hub.position.set(x*1.005,.42,z);car.add(hub);
+      }
+      root.add(car);
+      const side=i%2?1:-1, roadIndex=(i*3+Math.floor(i/4))%Math.min(roadOffsets.length,7);
+      const direction=i%4<2?1:-1;
+      const lane=(direction>0?-3.0:3.0)*(side<0?-1:1);
+      traffic.push({group:car,wheels,s:(i/trafficCount)*total,side,offset:roadOffsets[roadIndex],lane,direction,speed:8+(i%7)*1.25,groundY});
     }
     scene.add(root);cityRoot=root;
-    cityConfig={density,spacing,areaWidth,seed:seedBase,buildings:colliders.length,airport};
-    routeCache={tr,center,bounds,airport,total,n,areaWidth};
+    cityConfig={density,spacing,areaWidth,seed:seedBase,buildings:colliders.length,airport,roads:roadOffsets.length*2,vehicles:traffic.length,ground:'asphalt-grey',clearance:8};
+    routeCache={tr,center,bounds,airport,total,n,areaWidth,roadOffsets};
     cityBuildCount++;cityClock=0;
-    setStatus(`広域都市を生成：${colliders.length}棟／街区幅約${Math.round(areaWidth)}m。全ルートを検査し、線路から48m以上離して建物を配置しました。`);
+    setStatus(`都市を生成：${colliders.length}棟／道路${roadOffsets.length*2}本＋交差道路／走行車両${traffic.length}台。灰色舗装、レールとの干渉なし。`);
     return cityConfig;
   }
   function disposeCity(){
@@ -399,7 +457,7 @@ export function installCityFlight(api, editor, panel) {
     scene.remove(cityRoot);
     cityRoot.traverse(o=>{
       if(o.geometry && o.geometry!==unitBox && o.geometry!==unitCylinder) o.geometry.dispose();
-      if(o.material && !(Array.isArray(o.material)?o.material.some(m=>[...signMaterials.values()].includes(m)):signMaterials.has(o.material)) && o.material!==materials.concrete && o.material!==materials.facade && o.material!==materials.glass && o.material!==materials.glassLit && o.material!==materials.trim && o.material!==materials.dark && o.material!==materials.asphalt && o.material!==materials.roadMark && o.material!==materials.greenery && o.material!==materials.leaf && o.material!==materials.warm && o.material!==materials.runway && o.material!==materials.roof){
+      if(o.material && !(Array.isArray(o.material)?o.material.some(m=>[...signMaterials.values()].includes(m)):signMaterials.has(o.material)) && o.material!==materials.concrete && o.material!==materials.facade && o.material!==materials.glass && o.material!==materials.glassLit && o.material!==materials.trim && o.material!==materials.dark && o.material!==materials.asphalt && o.material!==materials.ground && o.material!==materials.roadMark && o.material!==materials.greenery && o.material!==materials.leaf && o.material!==materials.warm && o.material!==materials.runway && o.material!==materials.roof){
         const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{if(m.map && ![...signTextures.values()].includes(m.map))m.map.dispose();m.dispose();});
       }
     });
@@ -410,11 +468,14 @@ export function installCityFlight(api, editor, panel) {
     cityClock+=dt;
     const tr=routeCache.tr;
     for(const item of traffic){
-      item.s=(item.s+item.speed*dt)%tr.L;
+      item.s=(item.s+item.speed*dt*item.direction)%tr.L;
+      if(item.s<0)item.s+=tr.L;
       const f=frameAt(tr,item.s);
-      const x=item.side*17.5;
-      const p=worldFromLocal(f,x,0);
-      item.group.position.set(p.x,.02,p.z);item.group.rotation.y=f.yaw;
+      const lateral=item.side*item.offset+item.lane;
+      const p=worldFromLocal(f,lateral,0);
+      item.group.position.set(p.x,item.groundY+.01,p.z);
+      item.group.rotation.y=f.yaw+(item.direction<0?Math.PI:0);
+      for(const wheel of item.wheels)wheel.rotation.x+=item.speed*dt/.43*item.direction;
     }
   }
   function clearCity(){if(flight)closeFlight();stopCityPreview();disposeCity();cityConfig=null;setStatus('街区を削除しました。コース設計はそのまま残ります。');}
@@ -496,7 +557,7 @@ export function installCityFlight(api, editor, panel) {
     disposeMountains();
     const tr=getTrack(), style=['alpine','canyon','volcanic'].includes(config.style)?config.style:'alpine';
     const maxHeight=clamp(Number(config.height)||360,100,900);
-    const areaWidth=clamp(Number(config.areaWidth)||8000,2400,12000), half=areaWidth/2;
+    const areaWidth=clamp(Number(config.areaWidth)||10000,3000,16000), half=areaWidth/2;
     const seed=config.seed||((Date.now()>>>0)^0x61c88647);
     const root=new T.Group();root.name='CoasterMountainRange';
     const samples=routeSamples(tr,2600), segmentCount=clamp(Math.ceil(tr.L/360),8,34);
@@ -550,62 +611,160 @@ export function installCityFlight(api, editor, panel) {
   // City and mountain scenery are persisted as procedural settings in project ZIPs.
   function cityMeshes(){return [];}
 
-  function inferAircraftNose(model, box, size){
-    const axis=size.x>=size.z?'x':'z';
-    const other=axis==='x'?['y','z']:['x','y'];
-    const low=box.min[axis],high=box.max[axis],span=Math.max(.001,high-low);
-    const mid={x:(box.min.x+box.max.x)/2,y:(box.min.y+box.max.y)/2,z:(box.min.z+box.max.z)/2};
-    let lowSum=0,highSum=0,lowN=0,highN=0;
-    model.updateMatrixWorld(true);
-    model.traverse(o=>{
-      const a=o.isMesh&&o.geometry&&o.geometry.getAttribute('position');if(!a)return;
-      const stride=Math.max(1,Math.floor(a.count/1800));
-      const v=new T.Vector3();
-      for(let i=0;i<a.count;i+=stride){
-        v.fromBufferAttribute(a,i);o.localToWorld(v);
-        const q=v[axis],rad=Math.hypot(v[other[0]]-mid[other[0]],v[other[1]]-mid[other[1]]);
-        if(q<low+span*.14){lowSum+=rad;lowN++;}
-        if(q>high-span*.14){highSum+=rad;highN++;}
-      }
-    });
-    const noseAtLow=lowN&&highN?lowSum/lowN<highSum/highN:true;
-    return {axis,noseAtLow};
+  function addJetMesh(root, geometry, material, name, position = null) {
+    const mesh = new T.Mesh(geometry, material); mesh.name = name;
+    if (position) mesh.position.set(position[0], position[1], position[2]);
+    mesh.castShadow = true; mesh.receiveShadow = true; root.add(mesh); return mesh;
   }
-  function fitAircraftModel(model){
-    model.updateMatrixWorld(true);
-    let box=new T.Box3().setFromObject(model);
-    if(box.isEmpty())throw new Error('指定機体モデルに表示可能なメッシュがありません');
-    const size=box.getSize(new T.Vector3());
-    const axisInfo=inferAircraftNose(model,box,size);
-    const orient=new T.Group();orient.name='GeoFS_Aircraft_Orientation';
-    const yaw=axisInfo.axis==='x'?(axisInfo.noseAtLow?Math.PI/2:-Math.PI/2):(axisInfo.noseAtLow?Math.PI:0);
-    orient.rotation.y=yaw;orient.add(model);orient.updateMatrixWorld(true);
-    box=new T.Box3().setFromObject(orient);
-    const alignedSize=box.getSize(new T.Vector3()),center=box.getCenter(new T.Vector3());
-    orient.position.sub(center);
-    const length=Math.max(alignedSize.z,alignedSize.x,alignedSize.y);
-    // GeoFS glTF assets are normally authored in metres; preserve real model scale.
-    // Only normalize files whose units are clearly not metres.
-    const scale=(length>180||length<2)?(35/Math.max(0.001,length)):1;
-    orient.scale.setScalar(scale);orient.updateMatrixWorld(true);
-    return orient;
+  function makeFuselageGeometry() {
+    // Elliptical section loft: nose and tail taper continuously instead of using a box/cylinder.
+    const sections = [
+      [-19.2,.08,.10,.02],[-18.4,.42,.42,.02],[-16.8,.78,.72,.02],[-14.0,1.12,1.00,0],
+      [-10.0,1.48,1.28,0],[-4.0,1.76,1.50,0],[4.0,1.82,1.55,0],[9.5,1.68,1.42,.02],
+      [13.0,1.34,1.12,.06],[15.5,.92,.78,.10],[17.4,.42,.40,.12],[18.2,.06,.08,.12]
+    ];
+    const radial=40,positions=[],indices=[];
+    for(const [z,rx,ry,cy] of sections){
+      for(let j=0;j<radial;j++){
+        const a=j/radial*Math.PI*2;
+        positions.push(Math.cos(a)*rx,cy+Math.sin(a)*ry,z);
+      }
+    }
+    for(let i=0;i<sections.length-1;i++)for(let j=0;j<radial;j++){
+      const a=i*radial+j,b=i*radial+(j+1)%radial,c=(i+1)*radial+(j+1)%radial,d=(i+1)*radial+j;
+      indices.push(a,b,d,b,c,d);
+    }
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();g.computeBoundingSphere();return g;
+  }
+  function makeAirfoilWing(sections, side, material, root, name) {
+    const seg=20,positionsTop=[],positionsBottom=[],indices=[];
+    for(const sec of sections){
+      for(let j=0;j<=seg;j++){
+        const t=j/seg;
+        const thickness=5*.12*sec.chord*(.2969*Math.sqrt(Math.max(0,t))-.1260*t-.3516*t*t+.2843*t*t*t-.1015*t*t*t*t);
+        const z=sec.lead+t*sec.chord;
+        positionsTop.push(side*sec.span,sec.y+thickness,z);
+        positionsBottom.push(side*sec.span,sec.y-thickness,z);
+      }
+    }
+    for(let i=0;i<sections.length-1;i++)for(let j=0;j<seg;j++){
+      const a=i*(seg+1)+j,b=(i+1)*(seg+1)+j,c=b+1,d=a+1;
+      indices.push(a,b,d,b,c,d);
+    }
+    for(const [positions,suffix] of [[positionsTop,'Upper'],[positionsBottom,'Lower']]){
+      const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();g.computeBoundingSphere();
+      addJetMesh(root,g,material,`${name}_${suffix}`);
+    }
+  }
+  function makeProceduralJet() {
+    const root=new T.Group();root.name='Coaster_Original_TwinEngine_Jet';
+    const white=new T.MeshStandardMaterial({color:0xf1f2ee,roughness:.48,metalness:.16});
+    const underside=new T.MeshStandardMaterial({color:0xc6cdd0,roughness:.62,metalness:.12});
+    const metal=new T.MeshStandardMaterial({color:0x8d999f,roughness:.34,metalness:.72});
+    const darkMetal=new T.MeshStandardMaterial({color:0x303a40,roughness:.58,metalness:.35});
+    const glass=new T.MeshStandardMaterial({color:0x1e3949,roughness:.13,metalness:.28,transparent:true,opacity:.92});
+    const tire=new T.MeshStandardMaterial({color:0x161a1d,roughness:.9});
+    const hub=new T.MeshStandardMaterial({color:0xc2c8cb,roughness:.28,metalness:.8});
+    const lightRed=new T.MeshBasicMaterial({color:0xff3028});
+    const lightGreen=new T.MeshBasicMaterial({color:0x32e78c});
+    const lightWhite=new T.MeshBasicMaterial({color:0xfff2d0});
+    addJetMesh(root,makeFuselageGeometry(),white,'Fuselage');
+    // Subtle lower belly and nose radome seam.
+    const belly=addJetMesh(root,new T.SphereGeometry(1,24,16),underside,'LowerBelly',[0,-.38,-2]);belly.scale.set(1.65,.92,13.4);
+    const radome=addJetMesh(root,new T.SphereGeometry(1,24,16),underside,'NoseRadome',[0,.02,17.1]);radome.scale.set(.52,.40,1.12);
+    // Swept, tapered wings with a cambered airfoil section and visible wing tips.
+    const wingSections=[
+      {span:0,lead:2.4,chord:8.4,y:-.04},{span:4.5,lead:1.1,chord:7.45,y:.04},
+      {span:10.5,lead:-.85,chord:5.45,y:.28},{span:15.2,lead:-3.15,chord:3.45,y:.68},{span:18.0,lead:-5.25,chord:2.05,y:1.02}
+    ];
+    makeAirfoilWing(wingSections,1,white,root,'RightWing');
+    makeAirfoilWing(wingSections,-1,white,root,'LeftWing');
+    // Winglets, navigation lamps and flap/aileron panels.
+    for(const side of [-1,1]){
+      const winglet=new T.Shape();winglet.moveTo(0,0);winglet.lineTo(0,1.0);winglet.lineTo(.18,2.8);winglet.lineTo(.82,3.8);winglet.lineTo(1.15,3.65);winglet.lineTo(.65,1.3);winglet.lineTo(.45,0);winglet.closePath();
+      const wg=new T.ExtrudeGeometry(winglet,{depth:.22,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.04,bevelThickness:.05});
+      const wm=addJetMesh(root,wg,white,`Winglet_${side}`,[side*17.85,.85,-4.95]);wm.rotation.z=side*.08;
+      const nav=addJetMesh(root,new T.SphereGeometry(.16,12,8),side<0?lightRed:lightGreen,`NavigationLight_${side}`,[side*18.15,1.05,-4.9]);nav.scale.set(1,.8,1.2);
+      const flap=new T.Group();flap.name=`Aileron_${side}`;flap.position.set(side*11.6,-.02,-2.55);
+      const panel=new T.Mesh(new T.BoxGeometry(4.7,.095,1.45),underside);panel.position.set(0,-.02,-.66);flap.add(panel);root.add(flap);
+      if(!root.userData.ailerons)root.userData.ailerons=[];root.userData.ailerons.push({group:flap,side});
+      const flapGroup=new T.Group();flapGroup.name=`Flap_${side}`;flapGroup.position.set(side*6.6,-.03,-1.85);
+      const flapMesh=new T.Mesh(new T.BoxGeometry(4.2,.10,1.75),white);flapMesh.position.z=-.78;flapGroup.add(flapMesh);root.add(flapGroup);
+      if(!root.userData.flaps)root.userData.flaps=[];root.userData.flaps.push(flapGroup);
+    }
+    // Horizontal stabilizer uses the same lofted airfoil treatment.
+    const tailSections=[{span:0,lead:-15.0,chord:4.6,y:.65},{span:3.0,lead:-15.8,chord:3.7,y:.84},{span:7.2,lead:-17.0,chord:2.0,y:1.10}];
+    makeAirfoilWing(tailSections,1,white,root,'RightTailplane');makeAirfoilWing(tailSections,-1,white,root,'LeftTailplane');
+    // Vertical tail, rudder and dorsal fairing.
+    const finShape=new T.Shape();finShape.moveTo(-.42,0);finShape.lineTo(.42,0);finShape.lineTo(.48,1.8);finShape.lineTo(.35,4.3);finShape.lineTo(.18,5.0);finShape.lineTo(-.40,3.1);finShape.closePath();
+    const finGeo=new T.ExtrudeGeometry(finShape,{depth:.58,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.07,bevelThickness:.07});
+    addJetMesh(root,finGeo,white,'VerticalTail',[0,.85,-16.9]);
+    const rudder=new T.Group();rudder.name='Rudder';rudder.position.set(0,3.0,-16.8);
+    const rudderMesh=new T.Mesh(new T.BoxGeometry(.12,2.55,.10),underside);rudderMesh.position.y=.1;rudder.add(rudderMesh);root.add(rudder);
+    root.userData.rudder=rudder;
+    const elevatorL=addJetMesh(root,new T.BoxGeometry(3.2,.09,.78),underside,'Elevator_Left',[-3.9,1.2,-17.0]);
+    const elevatorR=addJetMesh(root,new T.BoxGeometry(3.2,.09,.78),underside,'Elevator_Right',[3.9,1.2,-17.0]);
+    root.userData.elevators=[elevatorL,elevatorR];
+    // Two detailed turbofan nacelles, with intake lips, fan blades and exhausts.
+    const engineFans=[];
+    for(const side of [-1,1]){
+      const eg=new T.Group();eg.name=`Turbofan_${side}`;eg.position.set(side*7.05,-1.22,.20);root.add(eg);
+      const profile=[[.68,-3.05],[.82,-2.82],[.98,-2.15],[1.05,-.95],[1.12,.95],[1.20,2.15],[1.16,2.55],[1.02,2.72],[.86,2.60],[.79,2.2]];
+      const lathe=new T.LatheGeometry(profile.map(v=>new T.Vector2(v[0],v[1])),32);lathe.rotateX(Math.PI/2);
+      addJetMesh(eg,lathe,metal,'Nacelle');
+      const intake=new T.Mesh(new T.TorusGeometry(1.06,.085,12,36),hub);intake.position.z=2.58;eg.add(intake);
+      const disk=new T.Mesh(new T.CircleGeometry(.94,36),darkMetal);disk.position.z=2.61;eg.add(disk);
+      const fan=new T.Group();fan.name='FanRotor';fan.position.z=2.64;eg.add(fan);
+      for(let k=0;k<18;k++){
+        const blade=new T.Mesh(new T.BoxGeometry(.11,.74,.055),hub);
+        const a=k/18*Math.PI*2;blade.position.set(Math.cos(a)*.43,Math.sin(a)*.43,0);blade.rotation.z=a+.30;fan.add(blade);
+      }
+      const spinner=new T.Mesh(new T.SphereGeometry(.24,16,10),metal);spinner.scale.set(1,1,.55);spinner.position.z=.03;fan.add(spinner);
+      const exhaust=new T.Mesh(new T.TorusGeometry(.79,.075,10,32),darkMetal);exhaust.position.z=-3.0;eg.add(exhaust);
+      const pylon=addJetMesh(root,new T.BoxGeometry(.92,1.55,2.9),white,`EnginePylon_${side}`,[side*7.05,-.62,-.15]);pylon.rotation.x=.08;
+      engineFans.push(fan);
+    }
+    // Passenger windows, four cockpit panes and door outlines.
+    const windowGeo=new T.SphereGeometry(1,12,8);
+    for(const side of [-1,1])for(let i=0;i<18;i++){
+      const z=-11.0+i*1.22;
+      const win=addJetMesh(root,windowGeo,glass,`CabinWindow_${side}_${i}`,[side*1.55,1.03,z]);win.scale.set(.075,.205,.30);
+    }
+    for(const side of [-1,1]){
+      for(let i=0;i<2;i++){
+        const pane=addJetMesh(root,new T.SphereGeometry(1,12,8),glass,`CockpitWindow_${side}_${i}`,[side*(.30+i*.40),.83,14.15-i*.48]);pane.scale.set(.27,.30,.09);pane.rotation.x=-.20;
+      }
+      for(const z of [8.4,-4.3]){
+        const door=addJetMesh(root,new T.BoxGeometry(.045,1.35,.78),metal,`CabinDoorFrame_${side}_${z}`,[side*1.68,.12,z]);
+      }
+    }
+    // Static antennas, pitot tubes, landing lights and beacon lamps.
+    for(const side of [-1,1]){
+      const pitot=addJetMesh(root,new T.CylinderGeometry(.025,.035,1.2,8),metal,`Pitot_${side}`,[side*1.7,.18,11.8]);pitot.rotation.z=Math.PI/2;
+      const wingLight=addJetMesh(root,new T.SphereGeometry(.13,10,8),lightWhite,`WingLandingLight_${side}`,[side*9.2,-.05,-.2]);
+    }
+    const beacon=new T.PointLight(0xff3322,1.3,28);beacon.position.set(0,2.1,-2.8);root.add(beacon);
+    const tailBeacon=addJetMesh(root,new T.SphereGeometry(.15,12,8),lightRed,'TailBeacon',[0,5.25,-16.7]);
+    // Functional landing gear assemblies with twin main wheels and a steerable nose wheel.
+    const gearGroup=new T.Group();gearGroup.name='landing-gear-assembly';root.add(gearGroup);
+    function addGear(x,z,nose=false){
+      const g=new T.Group();g.name=nose?'nose-gear':'main-gear';g.position.set(x,0,z);gearGroup.add(g);
+      const strut=new T.Mesh(new T.CylinderGeometry(nose?.10:.13,nose?.14:.18,nose?1.85:2.25,12),metal);strut.position.y=nose?-1.15:-1.35;g.add(strut);
+      const fork=new T.Mesh(new T.BoxGeometry(.16,.75,.16),hub);fork.position.set(0,nose?-2.42:-2.35,.03);g.add(fork);
+      const wheelCount=nose?1:2;
+      for(let i=0;i<wheelCount;i++){
+        const wheel=new T.Mesh(new T.CylinderGeometry(nose?.36:.48,nose?.36:.48,.25,20),tire);wheel.rotation.z=Math.PI/2;
+        wheel.position.set(nose?0:(i?-.30:.30),nose?-2.78:-2.67,.09);g.add(wheel);
+        const rim=new T.Mesh(new T.CylinderGeometry(nose?.17:.23,nose?.17:.23,.265,16),hub);rim.rotation.z=Math.PI/2;rim.position.copy(wheel.position);g.add(rim);
+      }
+      const door=addJetMesh(g,new T.BoxGeometry(nose?.8:1.4,.10,nose?1.2:1.7),underside,'GearDoor',[0,-.52,-.25]);door.rotation.x=.06;
+    }
+    addGear(0,10.3,true);addGear(-4.25,-3.9,false);addGear(4.25,-3.9,false);
+    return {root,gearParts:[gearGroup],beacon,navRed:null,navGreen:null,engineFans,ailerons:root.userData.ailerons,flaps:root.userData.flaps,elevators:root.userData.elevators,rudder:root.userData.rudder,modelStatus:'オリジナル3D旅客機（ローカル生成・通信不要）'};
   }
   async function buildAircraft(){
-    try{
-      if(typeof api.loadGLBFromURL!=='function')throw new Error('GLBローダーが接続されていません');
-      const model=await api.loadGLBFromURL(AIRCRAFT_GLB_URL);
-      const root=new T.Group();root.name='CityFlight_GeoFS_M135';
-      root.add(fitAircraftModel(model));
-      const beacon=new T.PointLight(0xff3322,1.5,18);beacon.position.set(0,3,-2);root.add(beacon);
-      const navRed=new T.PointLight(0xff3333,1.2,12);navRed.position.set(-20,.1,-2);root.add(navRed);
-      const navGreen=new T.PointLight(0x33ff88,1.2,12);navGreen.position.set(20,.1,-2);root.add(navGreen);
-      const gearParts=[];
-      root.traverse(o=>{if(o.isMesh&&/gear|wheel|landing/i.test(o.name||''))gearParts.push(o);});
-      return {root,gearParts,beacon,navRed,navGreen,modelStatus:'GeoFS指定GLB'};
-    }catch(error){
-      console.error('[CityFlight] Requested GeoFS aircraft could not be loaded.',error);
-      throw new Error(`指定されたGeoFS機体を読み込めませんでした。通信・CORS・GLB形式を確認してください。 (${error.message||error})`);
-    }
+    // All geometry is generated locally with Three.js; no remote model fetch and no CORS dependency.
+    return makeProceduralJet();
   }
   function makeFlightUI(){
     const ui=document.createElement('section');ui.id='city-flight-ui';ui.hidden=true;
@@ -628,7 +787,7 @@ export function installCityFlight(api, editor, panel) {
   function setFlightStatus(text){if(flightUI){const el=flightUI.querySelector('[data-f-status]');if(el)el.textContent=text;}}
   function updateFlightReadouts(){
     if(!flightUI||!flight)return;
-    const s=flight.speed*3.6, h=Math.max(0,flight.pos.y-2.4), hd=((flight.yaw*180/Math.PI)%360+360)%360;
+    const s=flight.speed*3.6, h=Math.max(0,flight.pos.y-FLIGHT_GROUND_ALT), hd=((flight.yaw*180/Math.PI)%360+360)%360;
     flightUI.querySelector('[data-f-speed]').textContent=`${Math.round(s)} km/h`;
     flightUI.querySelector('[data-f-alt]').textContent=`${Math.round(h)} m`;
     flightUI.querySelector('[data-f-heading]').textContent=`${String(Math.round(hd)).padStart(3,'0')}°`;
@@ -639,7 +798,7 @@ export function installCityFlight(api, editor, panel) {
     if(!routeCache) makeCity({density:'dense'});
     const a=routeCache.airport.spawn;
     scene.add(aircraft.root);
-    const f={...aircraft,pos:new T.Vector3(a.x,a.y,a.z),speed:0,yaw:a.yaw,pitch:0,roll:0,vSpeed:0,throttle:0.32,gear:true,flaps:0.25,airborne:false,paused:false,view:'chase',crashed:false,landed:false,time:0,control:{pitch:0,roll:0,yaw:0},lastCollision:0};
+    const f={...aircraft,pos:new T.Vector3(a.x,a.y,a.z),speed:0,yaw:a.yaw,pitch:0,roll:0,vSpeed:0,throttle:0.32,gear:true,flaps:0.25,airborne:false,paused:false,view:'chase',crashed:false,landed:false,time:0,control:{pitch:0,roll:0,yaw:0},lastCollision:0,engineFans:aircraft.engineFans||[],ailerons:aircraft.ailerons||[],flapParts:aircraft.flaps||[],elevators:aircraft.elevators||[],rudder:aircraft.rudder||null};
     f.root.position.copy(f.pos);flight=f;return f;
   }
   function applyFlightOrientation(){
@@ -663,13 +822,13 @@ export function installCityFlight(api, editor, panel) {
     const f=flight;if(!f)return;
     const forward=new T.Vector3(Math.sin(f.yaw)*Math.cos(f.pitch),Math.sin(f.pitch),Math.cos(f.yaw)*Math.cos(f.pitch));
     if(f.view==='cockpit'){
-      const eye=f.root.localToWorld(new T.Vector3(0,2.65,8.3));
+      const eye=f.root.localToWorld(new T.Vector3(0,2.45,11.9));
       api.camera.position.copy(eye);api.camera.up.set(0,1,0);api.camera.lookAt(eye.clone().add(forward.clone().multiplyScalar(120)));
     }else{
       const eye=f.pos.clone().addScaledVector(forward,-38).add(new T.Vector3(0,12,0));
       api.camera.position.lerp(eye,0.13);api.camera.up.set(0,1,0);api.camera.lookAt(f.pos.clone().addScaledVector(forward,22).add(new T.Vector3(0,3,0)));
     }
-    if(api.camera.far<7000){api.camera.far=7000;api.camera.updateProjectionMatrix();}
+    if(api.camera.far<Math.max(7000,(routeCache?.areaWidth||10000)*2.2)){api.camera.far=Math.max(7000,(routeCache?.areaWidth||10000)*2.2);api.camera.updateProjectionMatrix();}
   }
   function resetFlight(){
     if(!flight)return;
@@ -695,7 +854,7 @@ export function installCityFlight(api, editor, panel) {
       oldFog=scene.fog?{near:scene.fog.near,far:scene.fog.far}:null;
       oldFar=api.camera.far;
     }
-    const worldFar=Math.max(12000,(routeCache?.areaWidth||8000)*2.6);
+    const worldFar=Math.max(12000,(routeCache?.areaWidth||10000)*2.6);
     if(scene.fog){scene.fog.near=650;scene.fog.far=worldFar;}
     if(api.camera.far<worldFar){api.camera.far=worldFar;api.camera.updateProjectionMatrix();}
   }
@@ -729,7 +888,7 @@ export function installCityFlight(api, editor, panel) {
       const radius=Math.max(190,Math.max(routeCache.bounds.maxX-routeCache.bounds.minX,routeCache.bounds.maxZ-routeCache.bounds.minZ)*.72,routeCache.areaWidth*.82,Math.abs(routeCache.airport.x-c.x)*1.12);
       api.camera.position.set(c.x+Math.cos(previewAngle)*radius,c.y+110,c.z+Math.sin(previewAngle)*radius);
       api.camera.lookAt(c.x,c.y+18,c.z);
-      if(api.camera.far<7000){api.camera.far=7000;api.camera.updateProjectionMatrix();}
+      if(api.camera.far<Math.max(7000,(routeCache?.areaWidth||10000)*2.2)){api.camera.far=Math.max(7000,(routeCache?.areaWidth||10000)*2.2);api.camera.updateProjectionMatrix();}
     });
     setStatus('都市3Dプレビュー中です。もう一度「都市を表示」を押すと編集画面に戻ります。');
   }
@@ -773,8 +932,8 @@ export function installCityFlight(api, editor, panel) {
       f.speed=clamp(f.speed+(f.throttle*7.4-(f.gear?1.25:.8)-f.speed*.014-f.flaps*1.0)*dt,0,225);
       const forward=new T.Vector3(Math.sin(f.yaw)*Math.cos(f.pitch),Math.sin(f.pitch),Math.cos(f.yaw)*Math.cos(f.pitch));
       if(!f.airborne){
-        f.pos.x+=forward.x*f.speed*dt;f.pos.z+=forward.z*f.speed*dt;f.pos.y=2.4;
-        if(f.speed>70&&f.pitch>.12){f.airborne=true;f.pos.y=2.65;f.vSpeed=6.5;f.gear=true;setFlightStatus('AIRBORNE · CLIMB');}
+        f.pos.x+=forward.x*f.speed*dt;f.pos.z+=forward.z*f.speed*dt;f.pos.y=FLIGHT_GROUND_ALT;
+        if(f.speed>70&&f.pitch>.12){f.airborne=true;f.pos.y=FLIGHT_GROUND_ALT+.25;f.vSpeed=6.5;f.gear=true;setFlightStatus('AIRBORNE · CLIMB');}
         const ap=routeCache.airport;
         if(!f.airborne&&(Math.abs(f.pos.x-ap.x)>29||Math.abs(f.pos.z-ap.z)>885)){f.crashed=true;f.speed=0;setFlightStatus('RUNWAY OVERRUN · RESET');}
       }else{
@@ -789,15 +948,20 @@ export function installCityFlight(api, editor, panel) {
         const hit=checkBuildingCollision(f.pos);
         if(hit){f.crashed=true;f.speed=0;setFlightStatus('BUILDING IMPACT · RESET');}
       }
-      if(f.pos.y<=2.4&&f.airborne&&f.vSpeed<0){
+      if(f.pos.y<=FLIGHT_GROUND_ALT&&f.airborne&&f.vSpeed<0){
         const ap=routeCache.airport;
         const onRunway=Math.abs(f.pos.x-ap.x)<25&&Math.abs(f.pos.z-ap.z)<875;
-        if(onRunway&&f.gear&&f.vSpeed>-7&&f.speed<105){f.pos.y=2.4;f.vSpeed=0;f.airborne=false;f.landed=true;f.speed=Math.max(0,f.speed*.68);setFlightStatus('LANDING SUCCESS');}
-        else {f.pos.y=2.4;f.crashed=true;f.speed=0;setFlightStatus(onRunway?'HARD LANDING · RESET':'OFF-RUNWAY LANDING · RESET');}
+        if(onRunway&&f.gear&&f.vSpeed>-7&&f.speed<105){f.pos.y=FLIGHT_GROUND_ALT;f.vSpeed=0;f.airborne=false;f.landed=true;f.speed=Math.max(0,f.speed*.68);setFlightStatus('LANDING SUCCESS');}
+        else {f.pos.y=FLIGHT_GROUND_ALT;f.crashed=true;f.speed=0;setFlightStatus(onRunway?'HARD LANDING · RESET':'OFF-RUNWAY LANDING · RESET');}
       }
       // Keep the aircraft in the playable city airspace.
       if(f.pos.y>1400){f.pos.y=1400;f.vSpeed=Math.min(0,f.vSpeed);}
       f.root.position.copy(f.pos);applyFlightOrientation();
+      for(const fan of f.engineFans)fan.rotation.z+=dt*(12+f.throttle*110);
+      for(const a of f.ailerons||[])a.group.rotation.x=clamp(f.roll*a.side*.22,-.24,.24);
+      for(const flap of f.flapParts||[])flap.rotation.x=-(f.flaps||0)*.55;
+      for(const elevator of f.elevators||[])elevator.rotation.x=-f.pitch*.32;
+      if(f.rudder)f.rudder.rotation.y=clamp(f.control.yaw*.18,-.18,.18);
       if(f.gear){for(const p of f.gearParts)p.visible=true;}else{for(const p of f.gearParts)p.visible=false;}
       f.beacon.intensity=.8+Math.sin(f.time*6)*.7;
     }
@@ -853,12 +1017,12 @@ export function installCityFlight(api, editor, panel) {
   function destroy(){closeFlight();stopCityPreview();removeTrackFromView();disposeCity();disposeMountains();if(flightUI)flightUI.remove();if(previewExitUI)previewExitUI.remove();const st=document.getElementById('city-flight-style');if(st)st.remove();unitBox.dispose();unitCylinder.dispose();Object.values(materials).forEach(m=>m.dispose());for(const mat of signMaterials.values())mat.dispose();signMaterials.clear();for(const tex of signTextures.values())tex.dispose();signTextures.clear();}
 
   panel.innerHTML=`
-    <div class="cf-intro"><b>都市街区・フライト</b><span>コースを建物の間に通す広域都市を生成します。建物・看板・外壁は線路の通過帯から離して配置し、橋や建物でコースを横断しません。</span></div>
-    <div class="cf-options"><label>街区密度<select data-cf-density><option value="normal">標準</option><option value="dense" selected>高密度</option><option value="ultra">超高密度</option></select></label><label>ブロック間隔<input type="range" min="58" max="150" step="4" value="82" data-cf-spacing><output data-cf-spacing-label>82m</output></label><label>街区全体の幅<input type="range" min="2400" max="12000" step="400" value="8000" data-cf-width><output data-cf-width-label>8,000m</output></label></div>
+    <div class="cf-intro"><b>都市街区・フライト</b><span>灰色の舗装地面に道路網と走行車両を生成。コース脇のビルを近づけつつ、レールへの貫通は防ぎます。</span></div>
+    <div class="cf-options"><label>街区密度<select data-cf-density><option value="normal">標準</option><option value="dense" selected>高密度</option><option value="ultra">超高密度</option></select></label><label>ブロック間隔<input type="range" min="58" max="150" step="4" value="82" data-cf-spacing><output data-cf-spacing-label>82m</output></label><label>街区全体の幅<input type="range" min="3000" max="16000" step="500" value="10000" data-cf-width><output data-cf-width-label>10,000m</output></label></div>
     <div class="cf-buttons"><button data-cf-action="generate">街区を生成</button><button data-cf-action="refresh">街並みを再生成</button><button data-cf-action="clear">街区を削除</button></div>
     <div class="cf-buttons"><button data-cf-action="flight">フライトシム開始</button><button data-cf-action="focus">都市プレビュー</button></div>
     <div class="cf-stats" data-cf-stats>まだ街区は生成されていません。</div>
-    <div class="cf-note">街区幅は最大12km。建物本体・外装はコース全体との距離を検査し、線路の通過帯から48m以上離します。建物の橋やアーチはコース上に架けません。フライト機体は指定されたGeoFS GLBを使用します。</div>
+    <div class="cf-note">街区幅は最大16km。道路は複数列＋交差道路、車両は道路の車線上を往復します。地面は灰色アスファルトです。建物はコース脇へ近づけますが、レールと建物の間隔は近接配置のうえ、衝突しないよう検査します。フライト機はThree.jsで生成するオリジナル旅客機で、外部通信・CORSは不要です。</div>
   `;
   const panelStyle=document.createElement('style');panelStyle.id='city-flight-panel-style';panelStyle.textContent=`
     .cf-intro{display:grid;gap:4px;padding:9px 10px;border:1px solid #d2dcdf;border-radius:7px;background:#edf3f5;color:#2b3a55;font-size:12px;line-height:1.5}.cf-intro b{font-size:14px}.cf-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:9px 0}.cf-options label{display:grid;gap:4px;font-size:12px;color:#40516b}.cf-options select{height:32px;border:1px solid #b9c8d2;border-radius:6px;background:#fff;color:#2b3a55;padding:4px}.cf-options input{width:100%;accent-color:#486d91}.cf-options output{font-weight:700;color:#41566b}.cf-buttons{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0}.cf-buttons button{flex:1 1 135px;min-height:32px;padding:5px 8px;border:1px solid #c4d0d8;border-radius:6px;background:#fff;color:#2b3a55;font:700 12px system-ui}.cf-buttons button[data-cf-action="generate"],.cf-buttons button[data-cf-action="flight"]{background:#e5edf3;border-color:#9eb1c1}.cf-stats{margin-top:8px;padding:8px;border:1px solid #d8e0e4;border-radius:6px;background:#fff;color:#41566b;font-size:12px;white-space:pre-wrap}.cf-note{margin-top:7px;color:#66798a;font-size:11px;line-height:1.5}@media(max-width:520px){.cf-options{grid-template-columns:1fr}.cf-buttons button{flex:1 1 100%;}}
@@ -871,7 +1035,7 @@ export function installCityFlight(api, editor, panel) {
     try{
       if(action==='generate'||action==='refresh'){
         const config={density:panel.querySelector('[data-cf-density]').value,spacing:Number(panel.querySelector('[data-cf-spacing]').value),areaWidth:Number(panel.querySelector('[data-cf-width]').value),seed:Math.floor(Math.random()*0x7fffffff)};
-        const c=makeCity(config);panel.querySelector('[data-cf-stats]').textContent=`${c.buildings}棟／街区幅${Math.round(c.areaWidth).toLocaleString('ja-JP')}m／${routeCache.n}区間。コース通過帯の建物干渉チェック済み。`;
+        const c=makeCity(config);panel.querySelector('[data-cf-stats]').textContent=`${c.buildings}棟／街区幅${Math.round(c.areaWidth).toLocaleString('ja-JP')}m／道路${c.roads}本／車両${c.vehicles}台／${routeCache.n}区間。`;
       }else if(action==='clear'){clearCity();panel.querySelector('[data-cf-stats]').textContent='街区を削除しました。';}
       else if(action==='flight')startFlight();
       else if(action==='focus'){
@@ -883,6 +1047,6 @@ export function installCityFlight(api, editor, panel) {
   previewExitUI=makePreviewExitUI();
   const updateTimer=setInterval(()=>{if(!flight)updateCity(.08);},80);
   const oldUpdateDestroy=destroy;
-  api.cityFlight={makeCity,clearCity,makeMountainTerrain,clearMountains,serialize,restore,inspectCityClearance,getMeshes:cityMeshes,startFlight,closeFlight,destroy(){clearInterval(updateTimer);oldUpdateDestroy();panelStyle.remove();delete api.cityFlight;}};
+  api.cityFlight={makeCity,clearCity,makeMountainTerrain,clearMountains,serialize,restore,inspectCityClearance,getMeshes:cityMeshes,createAircraft:buildAircraft,startFlight,closeFlight,destroy(){clearInterval(updateTimer);oldUpdateDestroy();panelStyle.remove();delete api.cityFlight;}};
   return api.cityFlight;
 }

@@ -1,6 +1,6 @@
 import { installArchitecturePack } from './coaster_architecture.js';
 import { installCityFlight } from './coaster_city_flight.js';
-/* Coaster Expansion v8.1
+/* Coaster Expansion v9.0
  * Loaded by the game's main.js. Adds tools inside the native editor UI.
  * GLB/glTF importer supports triangle meshes, PBR base color/metal/roughness,
  * transforms and base-color textures. Skins, morph targets and animation are not imported.
@@ -160,15 +160,7 @@ export function installCoasterExpansion(api, helpers) {
   // The world tab is the single home for scenery, individual attractions and flight.
   const architecturePack = installArchitecturePack(api, editor, $('[data-world-architecture]'));
   const cityFlightPack = installCityFlight(api, editor, $('[data-world-cityflight]'));
-  // Reuse this add-on's GLB parser for the GeoFS aircraft URL; no second loader/library is needed.
-  api.loadGLBFromURL = async (url) => {
-    const response = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
-    if (!response.ok) throw new Error(`GLB取得失敗: HTTP ${response.status}`);
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength < 20 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) throw new Error('取得したファイルがGLB形式ではありません');
-    const file = new File([bytes], 'geo-fs-f3-7.glb', { type: 'model/gltf-binary' });
-    return loadGltf(file, [file]);
-  };
+  // The city-flight add-on builds its aircraft locally; no external GLB fetch or CORS is required.
 
   // Native-editor mountain quick mode: shown just above the first course drawing canvas.
   const mountainBar = document.createElement('section');
@@ -178,7 +170,7 @@ export function installCoasterExpansion(api, helpers) {
     <div class="ce-mountain-controls map-row">
       <label>地形<select data-mountain-style><option value="alpine">アルプス山脈</option><option value="canyon">渓谷</option><option value="volcanic">火山地帯</option></select></label>
       <label>山の高さ<input type="range" min="120" max="900" step="30" value="540" data-mountain-height><output data-mountain-height-label>540m</output></label>
-      <label>山岳範囲<input type="range" min="2400" max="12000" step="400" value="8000" data-mountain-width><output data-mountain-width-label>8,000m</output></label>
+      <label>山岳範囲<input type="range" min="2400" max="16000" step="500" value="10000" data-mountain-width><output data-mountain-width-label>10,000m</output></label>
       <label>コース形状<select data-mountain-route><option value="4">つづら折り</option><option value="1">S字・蛇行</option><option value="3">谷を回り込む</option></select></label>
     </div>
     <div class="ce-mountain-actions"><button type="button" class="chip" data-mountain-action="new">山岳コースを新規作成</button><button type="button" class="chip" data-mountain-action="scenery">現在のコースに山岳だけ追加</button><button type="button" class="chip" data-mountain-action="clear">山岳を削除</button></div>
@@ -1328,7 +1320,7 @@ export function installCoasterExpansion(api, helpers) {
   mountNativeUI();
 
   api.expansion={
-    version:'8.1',models,architecture:architecturePack,cityFlight:cityFlightPack,
+    version:'9.0',models,architecture:architecturePack,cityFlight:cityFlightPack,
     exportGLB:async()=>{
       if(typeof api.createTrackExportGroup!=='function')throw new Error('GLB出力APIがありません');
       const built=api.createTrackExportGroup(editor.design);
