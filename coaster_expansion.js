@@ -1,4 +1,4 @@
-/* Coaster Expansion v3.0
+/* Coaster Expansion v4.1
  * Loaded by the game's main.js. Adds tools inside the native editor UI.
  * GLB/glTF importer supports triangle meshes, PBR base color/metal/roughness,
  * transforms and base-color textures. Skins, morph targets and animation are not imported.
@@ -37,7 +37,23 @@ export function installCoasterExpansion(api, helpers) {
     .ce-integrated [hidden]{display:none!important}
     .ed-exp-viewtools{background:rgba(251,248,239,.96);border:1px solid #cfd9dd;border-radius:8px;box-shadow:0 1px 5px #25364b18;color:#2b3a55}
     .ed-exp-viewtools button{background:#fff;border:1px solid #c4d0d8;border-radius:6px;color:#2b3a55;min-height:29px;font:700 12px system-ui}
-    @media(max-width:520px){.ce-integrated .ce-row>label{flex:1 1 130px}.ce-integrated .ce-row input[type=number]{width:100%;max-width:125px}}
+    .ce-integrated .ce-tools-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .ce-integrated .ce-tool-block{min-width:0;padding:8px;border:1px solid #d8e0e4;border-radius:8px;background:#f8faf9}
+    .ce-integrated .ce-tool-block>b{display:block;margin-bottom:6px;font-size:12px;color:#2b3a55}
+    .ce-integrated .ce-tool-block .ce-row{margin:4px 0}
+    .ce-integrated .ce-tool-block button{min-height:30px;padding:5px 8px;font-size:11px}
+    .ce-integrated .ce-tool-block input,.ce-integrated .ce-tool-block select{width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+    .ce-integrated .ce-report{display:block;min-height:38px;padding:8px;border:1px solid #d8e0e4;border-radius:8px;background:#fff;color:#41566b;font:11px/1.5 system-ui;white-space:pre-wrap;overflow-wrap:anywhere}
+    #ce-ride-deck{position:fixed;z-index:2147483640;top:10px;left:10px;width:min(330px,calc(100vw - 20px));max-height:44vh;overflow:auto;box-sizing:border-box;padding:10px;border:1px solid #64748b;border-radius:12px;background:rgba(15,23,42,.94);color:#fff;box-shadow:0 5px 24px #0007;font:12px/1.4 system-ui,sans-serif}
+    #ce-ride-deck[hidden]{display:none!important}#ce-ride-deck .ce-rd-title{display:flex;justify-content:space-between;align-items:center;gap:6px;font-weight:800;margin-bottom:7px}
+    #ce-ride-deck .ce-rd-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+    #ce-ride-deck .ce-rd-metrics span{display:block;padding:6px;border-radius:7px;background:#25364f;min-width:0}
+    #ce-ride-deck .ce-rd-metrics b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+    #ce-ride-deck .ce-rd-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+    #ce-ride-deck button{min-height:30px;padding:5px 8px;border:1px solid #94a3b8;border-radius:7px;background:#f8fafc;color:#172033;font:700 11px system-ui}
+    #ce-ride-deck button[aria-pressed=true]{background:#b7e4ff;border-color:#38a3e6}
+    #ce-ride-deck .ce-rd-note{margin-top:7px;color:#cbd5e1;font-size:11px}
+    @media(max-width:520px){.ce-integrated .ce-row>label{flex:1 1 130px}.ce-integrated .ce-row input[type=number]{width:100%;max-width:125px}.ce-integrated .ce-tools-grid{grid-template-columns:1fr}#ce-ride-deck{max-height:36vh}}
   `;
   document.head.appendChild(style);
 
@@ -50,6 +66,7 @@ export function installCoasterExpansion(api, helpers) {
       <button type="button" class="chip on" data-tab="course" aria-selected="true">コース拡張</button>
       <button type="button" class="chip" data-tab="model" aria-selected="false">モデル配置</button>
       <button type="button" class="chip" data-tab="save" aria-selected="false">保存・出力</button>
+      <button type="button" class="chip" data-tab="power" aria-selected="false">追加26機能</button>
     </div>
     <div class="ce-status note" data-status role="status">準備完了。追加機能は元の編集画面に統合されています。</div>
     <div class="ce-panel" data-panel="course">
@@ -88,6 +105,47 @@ export function installCoasterExpansion(api, helpers) {
       <div class="ce-row"><button type="button" class="chip" data-action="project-save">プロジェクトZIPを保存</button><input type="file" data-project-file accept=".zip,application/zip"><button type="button" class="chip" data-action="project-load">プロジェクトZIPを開く</button></div>
       <div class="ce-row"><button type="button" class="chip" data-action="export-glb">現在のコース＋モデルをGLB出力</button></div>
       <small class="ce-note">プロジェクトZIPにはコース設計・配置モデル・モデル元ファイルをまとめます。GLB出力は3Dメッシュと基本PBR材質・読み込んだベースカラー画像を含みます。</small>
+    </div>
+    <div class="ce-panel" data-panel="power" hidden>
+      <div class="ce-note">既存のコース拡張・モデル配置・保存機能はそのまま残し、下記26機能を追加しています。編集内容は元に戻す操作に対応します。</div>
+      <div class="ce-tools-grid">
+        <section class="ce-tool-block">
+          <b>高さ・山の設計（1～10）</b>
+          <div class="ce-row"><button type="button" class="chip" data-action="alt-preset" data-value="100">100m</button><button type="button" class="chip" data-action="alt-preset" data-value="300">300m</button><button type="button" class="chip" data-action="alt-preset" data-value="600">600m</button><button type="button" class="chip" data-action="alt-preset" data-value="1000">1000m</button></div>
+          <div class="ce-row"><label>目標最高高度 (m)<input type="number" min="2" max="100000" step="10" data-alt-target value="600"></label><button type="button" class="chip" data-action="alt-exact">最高高度を設定</button></div>
+          <div class="ce-row"><label>高さ倍率<input type="number" min="0.1" max="20" step="0.1" data-alt-scale value="1.5"></label><button type="button" class="chip" data-action="alt-scale">倍率適用</button></div>
+          <div class="ce-row"><label>持ち上げ量 (m)<input type="number" min="-10000" max="10000" step="10" data-alt-offset value="100"></label><button type="button" class="chip" data-action="alt-offset">山を上下</button></div>
+          <div class="ce-row"><button type="button" class="chip" data-action="alt-reverse">山と谷を反転</button><button type="button" class="chip" data-action="alt-smooth">高さを滑らかに</button></div>
+          <div class="ce-row"><label>最大勾配<select data-alt-grade><option value="25">25%</option><option value="40" selected>40%</option><option value="60">60%</option><option value="100">100%</option></select></label><button type="button" class="chip" data-action="alt-grade">勾配を制限</button></div>
+          <div class="ce-row"><label>山の数<select data-alt-peaks><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></label><button type="button" class="chip" data-action="alt-waves">連続する山を生成</button></div>
+          <div class="ce-row"><button type="button" class="chip" data-action="alt-drop">超巨大ドロップ生成</button><button type="button" class="chip" data-action="alt-plateau">空中高原を生成</button></div>
+          <small class="ce-note">1 高度プリセット／2 数値高度／3 高さ倍率／4 高さオフセット／5 山谷反転／6 平滑化／7 勾配制限／8 多峰型／9 巨大落下／10 高原型</small>
+        </section>
+        <section class="ce-tool-block">
+          <b>コース形状（11～18）</b>
+          <div class="ce-row"><button type="button" class="chip" data-action="mirror-x">左右反転</button><button type="button" class="chip" data-action="mirror-z">前後反転</button></div>
+          <div class="ce-row"><label>回転角度 (°)<input type="number" step="5" data-path-rotation value="45"></label><button type="button" class="chip" data-action="path-rotate">角度回転</button></div>
+          <div class="ce-row"><label>平面倍率<input type="number" min="0.1" max="4" step="0.1" data-path-scale value="1.2"></label><button type="button" class="chip" data-action="path-scale">コース拡大・縮小</button></div>
+          <div class="ce-row"><label>X移動 (m)<input type="number" step="5" data-path-x value="20"></label><button type="button" class="chip" data-action="path-x">X方向へ移動</button></div>
+          <div class="ce-row"><label>Z移動 (m)<input type="number" step="5" data-path-z value="20"></label><button type="button" class="chip" data-action="path-z">Z方向へ移動</button></div>
+          <div class="ce-row"><label>簡略化誤差 (m)<input type="number" min="0.1" max="20" step="0.1" data-path-tolerance value="1"></label><button type="button" class="chip" data-action="path-simplify">点数を最適化</button></div>
+          <div class="ce-row"><label>ランダム形状<select data-random-kind><option value="0">大きな周回</option><option value="1">S字</option><option value="2">交差</option><option value="3">池周回</option><option value="4">ヘアピン</option><option value="5">スパイラル</option><option value="6">クローバー</option><option value="7">星型</option><option value="8">稲妻</option></select></label><button type="button" class="chip" data-action="random-course">別バリエーション</button></div>
+          <small class="ce-note">11 左右反転／12 前後反転／13 任意回転／14 平面拡縮／15 X移動／16 Z移動／17 点数最適化／18 ランダム別案</small>
+        </section>
+        <section class="ce-tool-block">
+          <b>設計診断（19～21）</b>
+          <div class="ce-row"><button type="button" class="chip" data-action="analyze-stats">コース諸元を分析</button><button type="button" class="chip" data-action="analyze-clashes">交差・接近を検査</button><button type="button" class="chip" data-action="analyze-physics">物理試走レポート</button></div>
+          <div class="ce-report" data-power-report>ここに分析結果を表示します。</div>
+          <small class="ce-note">19 全長・高度・勾配・範囲の諸元／20 線路の交差・接近箇所／21 物理試走と速度・G・結果のレポート</small>
+        </section>
+        <section class="ce-tool-block">
+          <b>走行中の操作と記録（22～26）</b>
+          <div class="ce-note">走行画面にも操作パネルが自動表示されます。</div>
+          <div class="ce-row"><button type="button" class="chip" data-action="show-ride-deck">走行パネルを表示</button><button type="button" class="chip" data-action="show-records">自己ベストを表示</button><button type="button" class="chip" data-action="new-challenge">ミッションを変更</button></div>
+          <div class="ce-report" data-record-report>走行記録はまだありません。</div>
+          <small class="ce-note">22 速度・高度・G・走行時間のライブ計器／23 カメラ切替／24 再生速度／25 一時停止／26 自己ベストとランダムミッション</small>
+        </section>
+      </div>
     </div>`;
   const $ = (selector) => dock.querySelector(selector);
   const statusEl = $('[data-status]');
@@ -193,6 +251,249 @@ export function installCoasterExpansion(api, helpers) {
     editor.onChange && editor.onChange();
     status('カーブを2段階で平滑化しました。元に戻す操作にも対応しています。');
   }
+
+  // ---------------- 新機能26個 ----------------
+  const HEIGHT_COUNT = 96;
+  const RECORD_KEY = 'coaster_expansion_records_v4';
+  const CHALLENGE_KEY = 'coaster_expansion_challenge_v4';
+  const savedRideSims = new WeakSet();
+  let lastRideSim = null;
+  let rideDeckManuallyHidden = false;
+  let ridePoll = 0;
+
+  function requireDesign(needsPath = false) {
+    const d = editor.design;
+    if (!d) throw new Error('先にコース編集を開始してください');
+    if (needsPath && (!Array.isArray(d.pts) || d.pts.length < 2)) throw new Error('先にコースを描いてください');
+    return d;
+  }
+  function readHeights(d) {
+    const src = Array.isArray(d.hs) && d.hs.length >= 2 ? d.hs : [];
+    return Array.from({ length: HEIGHT_COUNT }, (_, i) => {
+      const u = i * (src.length - 1) / (HEIGHT_COUNT - 1);
+      if (!src.length) return 2;
+      const a = Math.floor(u), b = Math.min(src.length - 1, a + 1), t = u - a;
+      const v = Number(src[a]) * (1 - t) + Number(src[b]) * t;
+      return Number.isFinite(v) ? Math.max(2, v) : 2;
+    });
+  }
+  function refreshEditedDesign(message, fit = false) {
+    editor.redraw = null;
+    editor.refresh(true);
+    if (fit && typeof editor.fitMapView === 'function') editor.fitMapView();
+    if (editor.onChange) editor.onChange();
+    status(message);
+    refreshPowerReports();
+  }
+  function editDesign(label, fn, needsPath = false, fit = false) {
+    const d = requireDesign(needsPath);
+    editor.record();
+    fn(d);
+    refreshEditedDesign(label, fit);
+  }
+  function smooth01(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+  function applyPeak(target) {
+    target = clamp(Number(target) || 0, 2, 100000);
+    editDesign(`高さを最高約${Math.round(target).toLocaleString()}mに設定しました。`, (d) => {
+      const hs = readHeights(d);
+      const current = Math.max(...hs);
+      if (current <= 2.01) {
+        const peaks = hs.map((_, i) => Math.pow(Math.sin(Math.PI * i / (HEIGHT_COUNT - 1)), 2));
+        const peakNorm = Math.max(...peaks) || 1;
+        d.hs = peaks.map(v => 2 + (target - 2) * v / peakNorm);
+      } else {
+        const factor = (target - 2) / (current - 2);
+        d.hs = hs.map(h => 2 + (h - 2) * factor);
+      }
+    });
+    $('[data-alt-target]').value = String(Math.round(target));
+  }
+  function transformPath(transform, label) {
+    editDesign(label, (d) => {
+      const old = d.pts.map(p => [Number(p[0]), Number(p[1])]);
+      const transformed = old.map((p, i) => transform(p[0], p[1], i));
+      const xs = transformed.map(p => p[0]), zs = transformed.map(p => p[1]);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+      const wantX = old[0][0] - transformed[0][0], wantZ = old[0][1] - transformed[0][1];
+      const dx = clamp(wantX, FIELD.x0 + 4 - minX, FIELD.x1 - 4 - maxX);
+      const dz = clamp(wantZ, FIELD.z0 + 4 - minZ, FIELD.z1 - 4 - maxZ);
+      const next = transformed.map(([x, z]) => [clamp(x + dx, FIELD.x0 + 2, FIELD.x1 - 2), clamp(z + dz, FIELD.z0 + 2, FIELD.z1 - 2)]);
+      if (polyLen(next) > MAX_LEN + 1) throw new Error(`変形後のコース長が${MAX_LEN.toLocaleString()}mを超えます`);
+      d.pts = next;
+    }, true, true);
+  }
+  function simplifyPath(points, tolerance) {
+    if (points.length < 3) return points.map(p => p.slice());
+    const keep = new Uint8Array(points.length);
+    keep[0] = keep[points.length - 1] = 1;
+    const stack = [[0, points.length - 1]];
+    while (stack.length) {
+      const [a, b] = stack.pop();
+      const p0 = points[a], p1 = points[b];
+      const dx = p1[0] - p0[0], dz = p1[1] - p0[1];
+      const len = Math.hypot(dx, dz) || 1;
+      let best = -1, bestDist = tolerance;
+      for (let i = a + 1; i < b; i++) {
+        const p = points[i];
+        const dist = Math.abs(dx * (p0[1] - p[1]) - (p0[0] - p[0]) * dz) / len;
+        if (dist > bestDist) { bestDist = dist; best = i; }
+      }
+      if (best >= 0) { keep[best] = 1; stack.push([a, best], [best, b]); }
+    }
+    return points.filter((_, i) => keep[i]).map(p => p.slice());
+  }
+  function report(text) { $('[data-power-report]').textContent = text; }
+  function getDesignStats() {
+    const d = requireDesign(true), hs = readHeights(d), pts = d.pts;
+    const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
+    const length = polyLen(pts);
+    const maxH = Math.max(...hs), minH = Math.min(...hs);
+    const ds = length / (hs.length - 1);
+    let climb = 0, descent = 0, maxGrade = 0;
+    for (let i = 1; i < hs.length; i++) {
+      const delta = hs[i] - hs[i - 1];
+      if (delta > 0) climb += delta; else descent -= delta;
+      maxGrade = Math.max(maxGrade, Math.abs(delta) / Math.max(0.01, ds) * 100);
+    }
+    const tr = editor.preview && editor.preview.tr;
+    return { length, width: Math.max(...xs) - Math.min(...xs), depth: Math.max(...zs) - Math.min(...zs), maxH, minH, drop: maxH - minH, climb, descent, maxGrade, points: pts.length, clashes: tr && tr.clashes ? tr.clashes.length : null, supports: tr && tr.supports ? tr.supports.length : null };
+  }
+  function refreshPowerReports() {
+    try {
+      const d = editor.design;
+      if (!d || !Array.isArray(d.pts) || d.pts.length < 2) return;
+      const s = getDesignStats();
+      $('[data-power-report]').textContent = `全長 ${Math.round(s.length).toLocaleString()}m ／ 平面 ${Math.round(s.width)}×${Math.round(s.depth)}m\n高さ ${Math.round(s.minH)}～${Math.round(s.maxH)}m ／ 落差 ${Math.round(s.drop)}m\n登り合計 ${Math.round(s.climb)}m ／ 下り合計 ${Math.round(s.descent)}m ／ 最大勾配 ${s.maxGrade.toFixed(1)}%\n制御点 ${s.points.toLocaleString()}個${s.clashes == null ? '' : ` ／ 交差 ${s.clashes}か所`}`;
+    } catch (_) { /* editor may be transitioning */ }
+  }
+  function readRideRecords() {
+    try { const a = JSON.parse(localStorage.getItem(RECORD_KEY) || '[]'); return Array.isArray(a) ? a.slice(0, 40) : []; }
+    catch (_) { return []; }
+  }
+  function writeRideRecords(records) {
+    try { localStorage.setItem(RECORD_KEY, JSON.stringify(records.slice(0, 40))); } catch (_) { /* storage may be disabled */ }
+  }
+  const CHALLENGES = [
+    { id: 'speed', title: '高速ランナー', metric: 'maxV', target: 180, unit: 'km/h', label: '最高速度180km/h以上' },
+    { id: 'height', title: '天空の設計士', metric: 'maxH', target: 300, unit: 'm', label: '最高高度300m以上' },
+    { id: 'drop', title: '垂直落下マスター', metric: 'drop', target: 200, unit: 'm', label: '落差200m以上' },
+    { id: 'air', title: '空中散歩', metric: 'air', target: 2.5, unit: '秒', label: 'エアタイム2.5秒以上' },
+    { id: 'long', title: 'ロングライド', metric: 'time', target: 90, unit: '秒', label: '走行90秒以上' },
+  ];
+  function getChallenge(forceNew = false) {
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      const saved = JSON.parse(localStorage.getItem(CHALLENGE_KEY) || 'null');
+      if (!forceNew && saved && saved.date === today && CHALLENGES.some(c => c.id === saved.id)) return CHALLENGES.find(c => c.id === saved.id);
+    } catch (_) { /* choose a fresh challenge */ }
+    const pick = CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
+    try { localStorage.setItem(CHALLENGE_KEY, JSON.stringify({ date: today, id: pick.id })); } catch (_) {}
+    return pick;
+  }
+  function formatRecordReport() {
+    const records = readRideRecords();
+    if (!records.length) return '走行記録はまだありません。コースを走ると自己ベストを自動保存します。';
+    const bestSpeed = Math.max(...records.map(r => r.maxV || 0));
+    const bestHeight = Math.max(...records.map(r => r.maxH || 0));
+    const bestDrop = Math.max(...records.map(r => r.drop || 0));
+    const challenge = getChallenge();
+    return `記録 ${records.length}走 ／ 最高速度 ${bestSpeed.toFixed(1)}km/h ／ 最高高度 ${bestHeight.toFixed(0)}m ／ 最大落差 ${bestDrop.toFixed(0)}m\n今日のミッション：${challenge.label}`;
+  }
+  function recordCompletedRide(sim, coaster) {
+    if (!sim || sim.mode !== 'done' || savedRideSims.has(sim)) return;
+    savedRideSims.add(sim);
+    const r = sim.summary();
+    const row = { date: new Date().toISOString(), result: r.result || 'unknown', maxV: Number((r.maxV * 3.6).toFixed(2)), maxH: Number((r.maxH || 0).toFixed(1)), drop: Number((r.drop || 0).toFixed(1)), air: Number((r.air || 0).toFixed(2)), time: Number((r.time || sim.t || 0).toFixed(2)), maxG: Number((r.maxG || 0).toFixed(2)), fun: r.fun || 0, safe: r.safe || 0, courseLength: coaster && coaster.tr ? Math.round(coaster.tr.L) : 0 };
+    const records = [row, ...readRideRecords()].slice(0, 40);
+    writeRideRecords(records);
+    const challenge = getChallenge();
+    const actual = challenge.metric === 'maxV' ? row.maxV : row[challenge.metric] || 0;
+    const passed = actual >= challenge.target;
+    const note = passed ? `ミッション達成：${challenge.label}` : `ミッション未達：${challenge.label}（今回 ${actual.toFixed(1)}${challenge.unit}）`;
+    const noteEl = rideDeck.querySelector('[data-rd-challenge]');
+    if (noteEl) noteEl.textContent = note;
+    updateRecordReport();
+  }
+  function updateRecordReport() {
+    const value = formatRecordReport();
+    const el = $('[data-record-report]');
+    if (el) el.textContent = value;
+    const rideEl = rideDeck && rideDeck.querySelector('[data-rd-records]');
+    if (rideEl) rideEl.textContent = value;
+  }
+  async function runPhysicsReport() {
+    const d = requireDesign(true);
+    status('物理試走を計算中…');
+    const dryTrack = api.buildTrack(d, null);
+    const dry = new api.Sim(dryTrack, d, { dry: true });
+    // 1フレームに少しずつ進め、スマホの画面が長時間固まらないようにする。
+    while (dry.mode !== 'done' && dry.t < 180) {
+      for (let i = 0; i < 480 && dry.mode !== 'done' && dry.t < 180; i++) dry.step();
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    const tr = api.buildTrack(d, dry.vEst);
+    const sim = new api.Sim(tr, d);
+    while (sim.mode !== 'done' && sim.t < 300) {
+      for (let i = 0; i < 480 && sim.mode !== 'done' && sim.t < 300; i++) sim.step();
+      report(`物理試走中… ${sim.t.toFixed(1)}秒／最大300秒。実際の走行時間には制限を加えません。`);
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    const r = sim.summary();
+    report(`試走${sim.mode === 'done' ? '完了' : '300秒時点'}：${r.result || '未完了'}\n最高速度 ${(r.maxV * 3.6).toFixed(1)}km/h ／ 最高G ${r.maxG.toFixed(2)}G ／ 横G ${r.maxLat.toFixed(2)}G\n落差 ${(r.drop || 0).toFixed(1)}m ／ エアタイム ${(r.air || 0).toFixed(2)}秒 ／ 走行時間 ${sim.t.toFixed(1)}秒\n脱落 ${r.ejected}人 ／ 交差 ${tr.clashes.length}か所`);
+    status(sim.mode === 'done' ? '物理試走レポートを作成しました。' : '300秒の試算区間を終了しました。実走には時間制限はありません。');
+  }
+
+  // 走行中の計器パネル。ゲームの本来のループには介入せず、現在値を読むだけ。
+  const rideDeck = document.createElement('aside');
+  rideDeck.id = 'ce-ride-deck';
+  rideDeck.hidden = true;
+  rideDeck.innerHTML = `
+    <div class="ce-rd-title"><span>COASTER LIVE PANEL</span><button type="button" data-rd-hide>閉じる</button></div>
+    <div class="ce-rd-metrics">
+      <span>速度<b data-rd-speed>0.0</b><small>km/h</small></span>
+      <span>高度<b data-rd-height>0</b><small>m</small></span>
+      <span>時間<b data-rd-time>0.0</b><small>秒</small></span>
+      <span>縦G<b data-rd-g>1.00</b><small>G</small></span>
+      <span>横G<b data-rd-lat>0.00</b><small>G</small></span>
+      <span>落差<b data-rd-drop>0</b><small>m</small></span>
+    </div>
+    <div class="ce-rd-row"><button type="button" data-rd-camera="auto">中継</button><button type="button" data-rd-camera="chase">追跡</button><button type="button" data-rd-camera="pov">先頭視点</button><button type="button" data-rd-camera="free">自由カメラ</button></div>
+    <div class="ce-rd-row"><button type="button" data-rd-speed="0.5">0.5倍</button><button type="button" data-rd-speed="1">1倍</button><button type="button" data-rd-speed="2">2倍</button><button type="button" data-rd-speed="4">4倍</button><button type="button" data-rd-pause>一時停止</button></div>
+    <div class="ce-rd-note" data-rd-challenge></div>
+    <div class="ce-rd-note" data-rd-records></div>`;
+  document.body.appendChild(rideDeck);
+  rideDeck.addEventListener('click', (event) => {
+    const b = event.target.closest('button'); if (!b) return;
+    try {
+      if (b.hasAttribute('data-rd-hide')) { rideDeckManuallyHidden = true; rideDeck.hidden = true; }
+      else if (b.dataset.rdCamera) { api.setCameraMode(b.dataset.rdCamera); }
+      else if (b.dataset.rdSpeed) { api.setPlaybackSpeed(Number(b.dataset.rdSpeed)); }
+      else if (b.hasAttribute('data-rd-pause')) { api.setPaused(!api.paused); b.textContent = api.paused ? '再生' : '一時停止'; }
+    } catch (e) { console.warn('[Coaster Expansion ride panel]', e); }
+  });
+  function pollRidePanel() {
+    const coaster = api.co, sim = coaster && coaster.sim;
+    const active = api.mode === 'ride' || api.mode === 'result';
+    rideDeck.hidden = !active || rideDeckManuallyHidden;
+    if (!active || !sim) return;
+    if (sim !== lastRideSim) { lastRideSim = sim; rideDeckManuallyHidden = false; rideDeck.hidden = false; }
+    const lead = sim.cars && sim.cars[0];
+    const speed = Math.abs(Number(sim.v) || 0) * 3.6;
+    rideDeck.querySelector('[data-rd-speed]').textContent = speed.toFixed(1);
+    rideDeck.querySelector('[data-rd-height]').textContent = lead && lead.f ? Math.round(lead.f.y).toLocaleString() : '—';
+    rideDeck.querySelector('[data-rd-time]').textContent = Number(sim.t || 0).toFixed(1);
+    rideDeck.querySelector('[data-rd-g]').textContent = lead ? Number(lead.gUf || 0).toFixed(2) : '—';
+    rideDeck.querySelector('[data-rd-lat]').textContent = lead ? Math.abs(Number(lead.gRf || 0)).toFixed(2) : '—';
+    rideDeck.querySelector('[data-rd-drop]').textContent = Math.round(sim.st && sim.st.drop || 0).toLocaleString();
+    rideDeck.querySelectorAll('[data-rd-camera]').forEach(b => b.setAttribute('aria-pressed', String(api.cameraMode === b.dataset.rdCamera)));
+    rideDeck.querySelectorAll('[data-rd-speed]').forEach(b => b.setAttribute('aria-pressed', String(api.playbackSpeed === Number(b.dataset.rdSpeed))));
+    const pause = rideDeck.querySelector('[data-rd-pause]');
+    pause.textContent = api.paused ? '再生' : '一時停止';
+    const challenge = getChallenge();
+    rideDeck.querySelector('[data-rd-challenge]').textContent = `今日のミッション：${challenge.label}`;
+    if (sim.mode === 'done') recordCompletedRide(sim, coaster);
+  }
+  ridePoll = setInterval(pollRidePanel, 220);
 
   function decodeDataUri(uri) {
     const m = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(uri || '');
@@ -756,6 +1057,157 @@ export function installCoasterExpansion(api, helpers) {
           const meshes=flattenMeshes(sources);const res=await exportGLB(meshes);
           status(`GLB出力完了：メッシュ ${res.meshes}個／プリミティブ ${res.primitives}個／テクスチャ ${res.textures}枚／${(res.bytes/1024/1024).toFixed(2)}MB`);
         }finally{built.group.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose&&m.dispose());}});}
+      } else if (a === 'alt-preset') {
+        applyPeak(Number(btn.dataset.value));
+      } else if (a === 'alt-exact') {
+        applyPeak(Number($('[data-alt-target]').value));
+      } else if (a === 'alt-scale') {
+        const factor = clamp(Number($('[data-alt-scale]').value) || 1, 0.1, 20);
+        editDesign(`高さを最低地点基準で ${factor.toFixed(2)} 倍にしました。`, d => {
+          const hs = readHeights(d), base = Math.min(...hs);
+          d.hs = hs.map(h => Math.max(2, base + (h - base) * factor));
+        });
+        $('[data-alt-target]').value = String(Math.round(Math.max(...readHeights(editor.design))));
+      } else if (a === 'alt-offset') {
+        const offset = clamp(Number($('[data-alt-offset]').value) || 0, -10000, 10000);
+        editDesign(`山の中央部を ${offset >= 0 ? '+' : ''}${offset}m 移動しました。`, d => {
+          const hs = readHeights(d);
+          d.hs = hs.map((h, i) => Math.max(2, h + offset * Math.pow(Math.sin(Math.PI * i / (HEIGHT_COUNT - 1)), 2)));
+        });
+      } else if (a === 'alt-reverse') {
+        editDesign('山と谷の高低を反転しました。', d => {
+          const hs = readHeights(d), lo = Math.min(...hs), hi = Math.max(...hs);
+          d.hs = hs.map((h, i) => {
+            const u = i / (HEIGHT_COUNT - 1), edge = Math.pow(Math.sin(Math.PI * u), 0.6);
+            return Math.max(2, hs[i] * (1 - edge) + (lo + hi - h) * edge);
+          });
+        });
+      } else if (a === 'alt-smooth') {
+        editDesign('高さプロファイルを5点移動平均で平滑化しました。', d => {
+          const hs = readHeights(d);
+          d.hs = hs.map((_, i) => {
+            let sum = 0, n = 0;
+            for (let k = -2; k <= 2; k++) { const j = clamp(i + k, 0, hs.length - 1); sum += hs[j]; n++; }
+            return sum / n;
+          });
+        });
+      } else if (a === 'alt-grade') {
+        const grade = clamp(Number($('[data-alt-grade]').value) || 40, 1, 100);
+        editDesign(`最大勾配を約${grade}%以内に整えました（端点は維持）。`, d => {
+          const hs = readHeights(d);
+          const routeLength = editor.preview && editor.preview.Lf || polyLen(d.pts);
+          const maxDelta = grade / 100 * routeLength / (HEIGHT_COUNT - 1);
+          for (let pass = 0; pass < 5; pass++) {
+            for (let i = 1; i < hs.length; i++) hs[i] = clamp(hs[i], hs[i - 1] - maxDelta, hs[i - 1] + maxDelta);
+            for (let i = hs.length - 2; i >= 0; i--) hs[i] = clamp(hs[i], hs[i + 1] - maxDelta, hs[i + 1] + maxDelta);
+          }
+          d.hs = hs.map(h => Math.max(2, h));
+        });
+      } else if (a === 'alt-waves') {
+        const peaks = clamp(Number($('[data-alt-peaks]').value) || 3, 2, 6);
+        const height = clamp(Number($('[data-alt-target]').value) || 600, 10, 100000);
+        editDesign(`${peaks}峰の連続コースターを生成しました（最高約${Math.round(height)}m）。`, d => {
+          const raw = Array.from({ length: HEIGHT_COUNT }, (_, i) => {
+            const u = i / (HEIGHT_COUNT - 1);
+            let wave = 0;
+            for (let k = 0; k < peaks; k++) {
+              const center = 0.12 + (0.76 * k / Math.max(1, peaks - 1));
+              const width = 0.12 + 0.025 * (k % 2);
+              wave = Math.max(wave, Math.exp(-Math.pow((u - center) / width, 2)));
+            }
+            return 2 + (height - 2) * wave;
+          });
+          d.hs = raw;
+        });
+      } else if (a === 'alt-drop') {
+        const height = clamp(Number($('[data-alt-target]').value) || 600, 10, 100000);
+        editDesign(`最高約${Math.round(height)}mの巨大ドロップを生成しました。`, d => {
+          d.hs = Array.from({ length: HEIGHT_COUNT }, (_, i) => {
+            const u = i / (HEIGHT_COUNT - 1);
+            const climb = smooth01((u - 0.04) / 0.28);
+            const fall = 1 - smooth01((u - 0.49) / 0.16);
+            return 2 + (height - 2) * climb * fall;
+          });
+        });
+      } else if (a === 'alt-plateau') {
+        const height = clamp(Number($('[data-alt-target]').value) || 600, 10, 100000);
+        editDesign(`高度約${Math.round(height)}mの空中高原を生成しました。`, d => {
+          d.hs = Array.from({ length: HEIGHT_COUNT }, (_, i) => {
+            const u = i / (HEIGHT_COUNT - 1);
+            const rise = smooth01((u - 0.06) / 0.2);
+            const fall = smooth01((0.94 - u) / 0.2);
+            return 2 + (height - 2) * Math.min(rise, fall);
+          });
+        });
+      } else if (a === 'mirror-x' || a === 'mirror-z') {
+        const d = requireDesign(true), xs = d.pts.map(p => p[0]), zs = d.pts.map(p => p[1]);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+        transformPath((x, z) => a === 'mirror-x' ? [2 * cx - x, z] : [x, 2 * cz - z], a === 'mirror-x' ? 'コースを左右反転しました。' : 'コースを前後反転しました。');
+      } else if (a === 'path-rotate') {
+        const deg = clamp(Number($('[data-path-rotation]').value) || 0, -3600, 3600), rad = deg * Math.PI / 180;
+        const d = requireDesign(true), cx = d.pts.reduce((v,p)=>v+p[0],0)/d.pts.length, cz = d.pts.reduce((v,p)=>v+p[1],0)/d.pts.length;
+        transformPath((x,z) => { const dx=x-cx,dz=z-cz; return [cx+dx*Math.cos(rad)-dz*Math.sin(rad),cz+dx*Math.sin(rad)+dz*Math.cos(rad)]; }, `${deg}°回転しました。`);
+      } else if (a === 'path-scale') {
+        const factor = clamp(Number($('[data-path-scale]').value) || 1, 0.1, 4);
+        const d = requireDesign(true), cx = d.pts.reduce((v,p)=>v+p[0],0)/d.pts.length, cz = d.pts.reduce((v,p)=>v+p[1],0)/d.pts.length;
+        transformPath((x,z) => [cx+(x-cx)*factor, cz+(z-cz)*factor], `コース平面を ${factor.toFixed(2)} 倍に変更しました。`);
+      } else if (a === 'path-x' || a === 'path-z') {
+        const delta = clamp(Number($(a === 'path-x' ? '[data-path-x]' : '[data-path-z]').value) || 0, -600, 600);
+        transformPath((x,z) => a === 'path-x' ? [x+delta,z] : [x,z+delta], `${a === 'path-x' ? 'X' : 'Z'}方向へ ${delta}m 移動しました。`);
+      } else if (a === 'path-simplify') {
+        const tolerance = clamp(Number($('[data-path-tolerance]').value) || 1, 0.1, 20);
+        editDesign('コースの制御点を最適化しました。', d => {
+          const before = d.pts.length, next = simplifyPath(d.pts, tolerance);
+          if (next.length < 2) throw new Error('最適化後のコース点が不足します');
+          d.pts = next;
+          d._simplifyMessage = `${before}点 → ${next.length}点`;
+        }, true);
+        const pts = editor.design.pts.length;
+        status(`制御点を ${pts.toLocaleString()} 点に最適化しました。`);
+      } else if (a === 'random-course') {
+        const kind = clamp(Number($('[data-random-kind]').value) || 0, 0, 8);
+        const raw = randomStroke((presetSeed += 101), kind, 0);
+        const xs = raw.map(p=>p[0]), zs = raw.map(p=>p[1]);
+        const spanX = Math.max(1,Math.max(...xs)-Math.min(...xs)), spanZ = Math.max(1,Math.max(...zs)-Math.min(...zs));
+        const factor = Math.min(2.6,(FIELD.x1-FIELD.x0-60)/spanX,(FIELD.z1-FIELD.z0-60)/spanZ);
+        let pts = raw.map(([x,z])=>[(x-(Math.min(...xs)+Math.max(...xs))/2)*factor+18,(z-(Math.min(...zs)+Math.max(...zs))/2)*factor+38]);
+        const length = polyLen(pts);
+        if (length > MAX_LEN) { const f = MAX_LEN / length * 0.97, ox=pts[0][0],oz=pts[0][1]; pts=pts.map(([x,z])=>[ox+(x-ox)*f,oz+(z-oz)*f]); }
+        editor.record(); editor.design.pts=pts; editor.design.hs=null; editor.design.gm=[];
+        refreshEditedDesign('ランダム形状の別案を生成しました。', true);
+      } else if (a === 'analyze-stats') {
+        const s = getDesignStats();
+        report(`全長 ${s.length.toFixed(1)}m
+平面サイズ ${s.width.toFixed(1)} × ${s.depth.toFixed(1)}m
+高さ ${s.minH.toFixed(1)}～${s.maxH.toFixed(1)}m／落差 ${s.drop.toFixed(1)}m
+登り合計 ${s.climb.toFixed(1)}m／下り合計 ${s.descent.toFixed(1)}m
+最大勾配 ${s.maxGrade.toFixed(1)}%／制御点 ${s.points}
+支柱 ${s.supports == null ? '未計算' : s.supports}本／交差 ${s.clashes == null ? '未計算' : s.clashes}か所`);
+        status('コース諸元の分析が完了しました。');
+      } else if (a === 'analyze-clashes') {
+        const d = requireDesign(true);
+        if (!editor.preview || !editor.preview.tr) editor.refresh(true);
+        const tr = editor.preview && editor.preview.tr;
+        if (!tr) throw new Error('線路データを生成できませんでした');
+        const ids = (tr.clashes || []).slice(0, 12);
+        const lines = ids.map(i => `${i}: X${tr.px[i].toFixed(1)} / Y${tr.py[i].toFixed(1)} / Z${tr.pz[i].toFixed(1)}`);
+        report(ids.length ? `交差・接近箇所 ${tr.clashes.length}件（先頭12件）\n${lines.join('\n')}` : '交差・接近は検出されませんでした。');
+        status(`交差・接近検査完了：${tr.clashes.length}件`);
+      } else if (a === 'analyze-physics') {
+        await runPhysicsReport();
+      } else if (a === 'show-ride-deck') {
+        rideDeckManuallyHidden = false; rideDeck.hidden = false;
+        status(api.mode === 'ride' || api.mode === 'result' ? '走行パネルを表示しました。' : '走行を開始するとライブ計器が表示されます。');
+      } else if (a === 'show-records') {
+        updateRecordReport();
+        report(formatRecordReport());
+        status('自己ベストと走行記録を表示しました。');
+      } else if (a === 'new-challenge') {
+        const c = getChallenge(true); updateRecordReport();
+        rideDeck.querySelector('[data-rd-challenge]').textContent = `新しいミッション：${c.label}`;
+        report(`新しいミッション：${c.title}
+達成条件：${c.label}`);
+        status(`新しいミッション「${c.title}」を設定しました。`);
       }
     }catch(e){console.error('[Coaster Expansion]',e);status(`エラー：${e&&e.message?e.message:e}`,true);}
     finally{btn.disabled=false;}
@@ -775,7 +1227,7 @@ export function installCoasterExpansion(api, helpers) {
   mountNativeUI();
 
   api.expansion={
-    version:'2.0',models,
+    version:'4.0',models,
     exportGLB:async()=>{
       if(typeof api.createTrackExportGroup!=='function')throw new Error('GLB出力APIがありません');
       const built=api.createTrackExportGroup(editor.design);
@@ -783,6 +1235,8 @@ export function installCoasterExpansion(api, helpers) {
       finally{built.group.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose&&m.dispose());}});}
     },
     destroy(){
+      clearInterval(ridePoll);
+      rideDeck.remove();
       dock.remove();style.remove();editor.onChange=oldOnChange;
       editor.buildTools=originalBuildToolsForDestroy;
       editor.open=oldOpen;

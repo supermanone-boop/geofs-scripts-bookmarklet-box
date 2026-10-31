@@ -18,6 +18,39 @@ const FRIC = 0.12;
 const DRAG = 0.0004;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+// 準備計算専用の上限。実走行の時間制限には使わない。
+const PREP_SIM_LIMIT = 900;
+
+// 巻き上げは一定速度なので、バンク計算用の試走では巻き上げ区間を解析的に飛ばす。
+// 高さ600m級で「準備中」のまま長時間メインスレッドを占有するのを防ぐ。
+function runDryEstimate(dry, tr) {
+  // 駅を出て巻き上げが始まるところまでは通常どおり計算する。
+  while (dry.mode !== 'done' && dry.t < 12 && !dry.liftOn) dry.step();
+
+  if (dry.mode !== 'done' && dry.liftOn && tr.liftEnd > 0) {
+    // 巻き上げ区間の速さは LIFT_V。各点に値を埋め、バンク推定を欠かさない。
+    for (let i = 0; i < tr.n; i++) {
+      if (tr.fl[i] & F.LIFT) dry.vEst[i] = Math.max(dry.vEst[i], LIFT_V);
+    }
+    // 最後尾の車両まで巻き上げを抜けた位置へ移動する。
+    const liftExit = Math.min(dry.L - 2, tr.liftEnd * DS + (dry.nCars - 1) * CAR_GAP + 1.5);
+    if (liftExit > dry.s) {
+      dry.s = liftExit;
+      dry.v = Math.max(dry.v, LIFT_V);
+      dry.left = true;
+      dry.liftOn = false;
+      dry.liftDone = true;
+      dry.stillT = 0;
+      dry.layout();
+    }
+  }
+
+  // 発射式など、巻き上げを使わないコースも無限ループさせない。
+  // 上限到達時は取得済みの速度推定値で線路を生成する。
+  if (dry.mode !== 'done') dry.runToEnd(PREP_SIM_LIMIT);
+  return dry;
+}
+
 // 線路の上の位置 s（m）の値を、隣の点との直線補間で out に入れる
 export function sampleTrack(tr, s, out) {
   const x = (((s / DS) % tr.n) + tr.n) % tr.n;
@@ -170,6 +203,13 @@ export class Sim {
     this.stepChunks(dt);
     this.stepBodies(dt);
     this.layout();
+    // 高高度・極端な加速度で数値が非有限になった場合だけ安全終了する。
+    // 時間上限ではなく NaN / Infinity による無限計算を防ぐガード。
+    const lead = this.cars && this.cars[0];
+    if (this.mode !== 'done' && (!Number.isFinite(this.t) || !Number.isFinite(this.s) || !Number.isFinite(this.v) || (lead && (!Number.isFinite(lead.f.x) || !Number.isFinite(lead.f.y) || !Number.isFinite(lead.f.z))))) {
+      this.emit('stuck', Number.isFinite(lead?.f?.x) ? lead.f.x : 0, Number.isFinite(lead?.f?.y) ? lead.f.y : 0, Number.isFinite(lead?.f?.z) ? lead.f.z : 0);
+      this.finish('stuck');
+    }
     if (this.mode !== 'done') {
       if (this.mode === 'crash' && this.crashT > 7 && this.settled()) this.finish();
       else if (this.mode === 'crash' && this.crashT > 14) this.finish();
@@ -813,10 +853,11 @@ export function addBrakesUntilSafe(design, buildTrack, maxAdd = 5) {
     const sim = new Sim(tr, d);
     // 1 周目にいちばん先まで進んだ所（坂を登りきれずに駅まで戻ったときに使う）
     let far = 0;
-    while (sim.mode !== 'done') {
+    while (sim.mode !== 'done' && sim.t < PREP_SIM_LIMIT) {
       sim.step();
       if (!sim.lap && sim.s > far) far = sim.s;
     }
+    if (sim.mode !== 'done') return { gm, added, ok: false };
     const r = sim.summary();
     if (r.result === 'clear' && !r.ejected) return { gm, added, ok: true };
     // ブレーキで遅くなりすぎて、坂を登れなかった：足す前に戻してやめる
@@ -878,7 +919,7 @@ export function safeAutoHeights(design, seed, peak, autoHeights, buildTrack, kin
   for (let k = 0; k < 5; k++) {
     hs = autoHeights(design, seed + k * 101, peak * (1 - k * 0.12), kind);
     const d = { mat: 1, bar: 1, cars: 4, start: 0, gm: [], ...design, hs };
-    const r = new Sim(prepare(d, buildTrack), d).runToEnd();
+    const r = new Sim(prepare(d, buildTrack), d).runToEnd(PREP_SIM_LIMIT);
     if (r.result === 'clear' && !r.ejected) break;
   }
   return hs;
@@ -964,7 +1005,7 @@ export const GIMMICK_THEMES = [
 function speedAlong(design, buildTrack, Lf) {
   const tr = buildTrack(design, null);
   const dry = new Sim(tr, design, { dry: true });
-  dry.runToEnd();
+  runDryEstimate(dry, tr);
   const v = new Float64Array(Math.ceil(Lf) + 2);
   let acc = 0;
   let all = 0;
@@ -1109,7 +1150,7 @@ const rankOf = (r) => (r.grade === 'bigfail' ? 2 : r.grade === 'fail' ? 1 : 0);
 export function prepare(design, buildTrack) {
   const dryTr = buildTrack(design, null);
   const dry = new Sim(dryTr, design, { dry: true });
-  dry.runToEnd();
+  runDryEstimate(dry, dryTr);
   const tr = buildTrack(design, dry.vEst);
   return tr;
 }

@@ -1524,14 +1524,17 @@ export function buildTrackMeshes(tr, rail = 0, night = false) {
         const l = Math.hypot(rx, rz) || 1;
         rx /= l;
         rz /= l;
-        const w = 0.7 + y * 0.06;
+        // 高架は基部を広くしたテーパー支柱にする。幅と補強材数を上限付きにし、
+        // 600 m 級のコースでも数十万本の小さな梁を生成しない。
+        const w = Math.min(14, 0.7 + y * 0.022);
         const A = [top[0] - rx * w, 0, top[2] - rz * w];
         const B = [top[0] + rx * w, 0, top[2] + rz * w];
         const At = [top[0] - rx * 0.6, y, top[2] - rz * 0.6];
         const Bt = [top[0] + rx * 0.6, y, top[2] + rz * 0.6];
         b.beam(A, At, 0.22, 0.22, lk.sup);
         b.beam(B, Bt, 0.22, 0.22, lk.sup);
-        const steps = Math.max(1, Math.floor(y / 3));
+        const bracePitch = y > 300 ? 30 : y > 100 ? 18 : y > 45 ? 9 : 3;
+        const steps = Math.max(1, Math.min(24, Math.ceil(y / bracePitch)));
         for (let k = 1; k <= steps; k++) {
           const f0 = (k - 1) / steps;
           const f1 = k / steps;

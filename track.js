@@ -1027,16 +1027,20 @@ function makeChunks(tr) {
 }
 export const chunkOf = (i) => Math.floor(i / CHUNK);
 
-// 支柱（6 m ごと。線路が上を向いている所だけ）
+// 支柱。低い区間は密に、高い区間は間隔を広げる（高架でメッシュが爆発するのを防ぐ）。
 function makeSupports(tr) {
   tr.supports = [];
-  const step = Math.round(6 / DS);
-  for (let i = 0; i < tr.n; i += step) {
+  let nextAt = 0;
+  for (let i = 0; i < tr.n; i++) {
     if (tr.fl[i] & (F.STATION | F.GAP)) continue;
     if (tr.uy[i] < 0.45) continue;
-    const y = tr.py[i] - tr.uy[i] * 0.55;
-    if (y < 0.6) continue;
+    const y = Math.max(0, tr.py[i] - tr.uy[i] * 0.55);
+    if (y < 0.6 || i < nextAt) continue;
+    // 高さに応じて 6 / 10 / 16 / 24 / 36 / 48 m 間隔。
+    // 600 m 級以上で全区間を 6 m 間隔にすると、木製支柱の補強材が過剰になる。
+    const spacing = y < 30 ? 6 : y < 80 ? 10 : y < 180 ? 16 : y < 350 ? 24 : y < 700 ? 36 : 48;
     tr.supports.push(i);
+    nextAt = i + Math.max(1, Math.round(spacing / DS));
   }
 }
 

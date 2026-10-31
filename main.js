@@ -23,7 +23,7 @@ const GAME_URL = location.origin + location.pathname.replace(/index\.html$/, '')
 const HASHTAG = 'ジェットコースターを作ろう';
 const SAVE_KEY = 'rc_design';
 // ゲームのバージョン（タイトル画面の右下に出す）。public/coaster/ のソースを変えるコミットごとに末尾（パッチ）を 1 つ上げる
-const VERSION = '1.2.0 + 拡張3.0';
+const VERSION = '1.2.0 + 拡張4.1';
 const verEl = document.getElementById('ver');
 if (verEl) verEl.textContent = `ver ${VERSION}`;
 
@@ -987,6 +987,10 @@ function updateRide(dt) {
   }
   if (n >= maxN) simAcc = 0;
   player.seen = Math.max(player.seen, sim.t);
+  // 長いコースでは再生時間を実走に合わせて延長。180秒などの固定上限は設けない。
+  if (sim.mode === 'done') player.dur = Math.max(0.1, sim.t);
+  else if (sim.t >= player.dur - 25) player.dur = sim.t + Math.max(25, player.dur * 0.08);
+  addPlayerMarks(sim.events);
   handleEvents(sim, sim.t);
   // チェーンの音・走る音・悲鳴
   const sp = Math.abs(sim.v);
@@ -1037,36 +1041,35 @@ try {
   barPref = localStorage.getItem('rc_bar') || 'on';
 } catch (e) { /* 保存できなくても使える */ }
 ui.ride.dataset.bar = barPref;
-// 走り始める前に、最後まで計算して、長さと印（事故・宙返りなど）を出しておく
+// 走行時間は概算から開始し、実走行に合わせて延長する。イベント印も実走中に追加する。
 function prepPlayer() {
-  const s = new Sim(co.tr, co.design);
-  s.runToEnd();
-  player.dur = s.t;
+  // 走行開始前に最後まで同期試走すると、高高度コースで画面が固まる。
+  // 初期値は概算にし、実走行中に必要なら延長、完走時に正確な時間へ確定する。
+  const liftEstimate = co.design.start === 0 ? Math.max(0, co.tr.maxH - 2) / 4.2 : 0;
+  player.dur = Math.max(30, co.tr.L / 18 + liftEstimate + 20);
   player.seen = 0;
   player.paused = false;
   player.scrub = false;
   player.pending = null;
   player.reviewed = false;
-  const marks = [];
-  for (const e of s.events) {
-    const icon = MARK_ICON[e.type];
-    if (!icon) continue;
-    // 同じ印が近くに続くとき（何人も飛ぶ・崩れる）は 1 つにまとめる
-    if (marks.some((m) => m.icon === icon && Math.abs(m.t - e.t) < 2.5)) continue;
-    if (marks.some((m) => Math.abs(m.t - e.t) < 0.4)) continue;
-    marks.push({ t: e.t, icon, name: MARK_NAME[e.type] });
-    if (marks.length >= 14) break;
-  }
-  player.marks = marks;
+  player.marks = [];
   const box = ui.plTrack.querySelector('.pl-marks');
   box.innerHTML = '';
-  for (const m of marks) {
+  ui.plDur.textContent = player.dur.toFixed(1);
+  refreshPlay();
+}
+function addPlayerMarks(events) {
+  const box = ui.plTrack.querySelector('.pl-marks');
+  for (const e of events) {
+    const icon = MARK_ICON[e.type];
+    if (!icon || player.marks.length >= 14) continue;
+    if (player.marks.some((m) => m.icon === icon && Math.abs(m.t - e.t) < 2.5)) continue;
+    if (player.marks.some((m) => Math.abs(m.t - e.t) < 0.4)) continue;
+    const m = { t: e.t, icon, name: MARK_NAME[e.type] };
     const el = document.createElement('span');
     el.textContent = m.icon;
     el.title = m.name;
-    el.style.left = `${(m.t / Math.max(0.1, player.dur)) * 100}%`;
     el.hidden = true;
-    // 印をタップ：その少し手前から見る
     el.addEventListener('pointerdown', (ev) => {
       ev.stopPropagation();
       sound.sfx('tap');
@@ -1074,16 +1077,18 @@ function prepPlayer() {
       player.paused = false;
     });
     m.el = el;
+    player.marks.push(m);
     box.appendChild(el);
   }
-  ui.plDur.textContent = player.dur.toFixed(1);
-  refreshPlay();
 }
+
 function seekTo(t) {
   t = clamp(t, 0, player.dur);
   resetRide();
   const sim = co.sim;
   while (sim.mode !== 'done' && sim.t < t) sim.step();
+  if (sim.mode === 'done') player.dur = Math.max(0.1, sim.t);
+  addPlayerMarks(sim.events);
   sim.evI = sim.events.length;
   // 飛ぶ前に起きたことのうち、場面に残るもの（事故の場所・逃げる観客・飛んだ人の目線）だけを写す
   for (const e of sim.events) {
@@ -1134,9 +1139,11 @@ function renderPlayer() {
   ui.plNow.textContent = t.toFixed(1);
   // はじめて見ているときは、まだ見ていない所の印は出さない（何が起きるか先に分かってしまう）
   for (const m of player.marks) {
+    m.el.style.left = `${clamp(m.t / Math.max(0.1, player.dur), 0, 1) * 100}%`;
     const hide = !(player.reviewed || m.t <= player.seen + 0.05);
     if (m.el.hidden !== hide) m.el.hidden = hide;
   }
+  ui.plDur.textContent = player.dur.toFixed(1);
   refreshPlay();
 }
 function seekFromX(clientX) {
@@ -1240,6 +1247,9 @@ function skipRide() {
   sound.sfx('tap');
   const sim = co.sim;
   sim.runToEnd();
+  player.dur = Math.max(0.1, sim.t);
+  player.seen = Math.max(player.seen, sim.t);
+  addPlayerMarks(sim.events);
   sim.evI = sim.events.length;
   for (const e of sim.events) {
     if (e.type === 'crash') {
@@ -1911,7 +1921,41 @@ const coasterExpansionRuntime = {
   get renderer() { return renderer; },
   get THREE() { return THREE; },
   get mode() { return mode; },
+  get sim() { return co ? co.sim : null; },
+  get cameraMode() { return cam.mode; },
+  get paused() { return !!player.paused; },
+  get playbackSpeed() { return speed; },
+  setCameraMode(name) {
+    if (!CAM_MODES.includes(name)) throw new Error('未対応のカメラモードです');
+    cam.mode = name;
+    if (name === 'free') activateFreeCamera();
+    else { freeCamPanel.hidden = true; clearFreeCamMoves(); }
+    ui.camBtn.textContent = `🎥 ${CAM_NAMES[name]}`;
+    cam.shotT = 0;
+    return cam.mode;
+  },
+  setPlaybackSpeed(value) {
+    const v = Number(value);
+    if (!SPEEDS.includes(v)) throw new Error('再生速度は0.5 / 1 / 2 / 4倍から選んでください');
+    setSpeed(v);
+    return speed;
+  },
+  setPaused(value) {
+    if (mode !== 'ride') return false;
+    if (co && co.sim.mode === 'done' && !value) player.pending = 0;
+    player.paused = !!value;
+    refreshPlay();
+    return player.paused;
+  },
+  togglePlayback() {
+    if (mode !== 'ride') return false;
+    togglePlay();
+    return player.paused;
+  },
   normalize,
+  buildTrack,
+  prepare,
+  Sim,
   createTrackExportGroup(design = editor.design) {
     if (!design || !Array.isArray(design.pts) || design.pts.length < 2) throw new Error('書き出すコースがありません');
     const tr = prepare(design, buildTrack);
