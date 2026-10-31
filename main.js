@@ -23,7 +23,7 @@ const GAME_URL = location.origin + location.pathname.replace(/index\.html$/, '')
 const HASHTAG = 'ジェットコースターを作ろう';
 const SAVE_KEY = 'rc_design';
 // ゲームのバージョン（タイトル画面の右下に出す）。public/coaster/ のソースを変えるコミットごとに末尾（パッチ）を 1 つ上げる
-const VERSION = '1.2.0 + 拡張5.0';
+const VERSION = '1.2.0 + 拡張6.0';
 const verEl = document.getElementById('ver');
 if (verEl) verEl.textContent = `ver ${VERSION}`;
 
@@ -1848,7 +1848,16 @@ function frame(now) {
   last = now;
   if (!window.__rc || !window.__rc.paused) tick(dt);
 }
+let extensionFrameHook = null;
 function tick(dt, render = true) {
+  if (extensionFrameHook) {
+    try { extensionFrameHook(dt); }
+    catch (error) { console.error('[Coaster Expansion frame hook]', error); extensionFrameHook = null; }
+    if (extensionFrameHook) {
+      if (render) renderer.render(scene3d, camera);
+      return;
+    }
+  }
   modeT += dt;
   for (const p of popups) p.t += dt;
   while (popups.length && popups[0].t > 2.2) popups.shift();
@@ -1925,6 +1934,12 @@ const coasterExpansionRuntime = {
   get cameraMode() { return cam.mode; },
   get paused() { return !!player.paused; },
   get playbackSpeed() { return speed; },
+  setFrameHook(fn) {
+    if (fn != null && typeof fn !== 'function') throw new TypeError('フレームフックは関数またはnullを指定してください');
+    extensionFrameHook = fn || null;
+    return !!extensionFrameHook;
+  },
+  clearFrameHook() { extensionFrameHook = null; },
   setCameraMode(name) {
     if (!CAM_MODES.includes(name)) throw new Error('未対応のカメラモードです');
     cam.mode = name;
