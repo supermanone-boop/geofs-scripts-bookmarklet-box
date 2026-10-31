@@ -1,6 +1,6 @@
 import { installArchitecturePack } from './coaster_architecture.js';
 import { installCityFlight } from './coaster_city_flight.js';
-/* Coaster Expansion v7.0
+/* Coaster Expansion v8.1
  * Loaded by the game's main.js. Adds tools inside the native editor UI.
  * GLB/glTF importer supports triangle meshes, PBR base color/metal/roughness,
  * transforms and base-color textures. Skins, morph targets and animation are not imported.
@@ -69,8 +69,7 @@ export function installCoasterExpansion(api, helpers) {
       <button type="button" class="chip" data-tab="model" aria-selected="false">モデル配置</button>
       <button type="button" class="chip" data-tab="save" aria-selected="false">保存・出力</button>
       <button type="button" class="chip" data-tab="power" aria-selected="false">追加26機能</button>
-      <button type="button" class="chip" data-tab="architecture" aria-selected="false">建築アトラクション19</button>
-      <button type="button" class="chip" data-tab="cityflight" aria-selected="false">都市街区・フライト</button>
+      <button type="button" class="chip" data-tab="world" aria-selected="false">街区・山岳・建築</button>
     </div>
     <div class="ce-status note" data-status role="status">準備完了。追加機能は元の編集画面に統合されています。</div>
     <div class="ce-panel" data-panel="course">
@@ -151,13 +150,104 @@ export function installCoasterExpansion(api, helpers) {
         </section>
       </div>
     </div>
-    <div class="ce-panel" data-panel="architecture" hidden></div>
-    <div class="ce-panel" data-panel="cityflight" hidden></div>`;
+    <div class="ce-panel ce-world-panel" data-panel="world" hidden>
+      <details class="ce-world-section" open><summary>都市街区・フライトシム</summary><div data-world-cityflight></div></details>
+      <details class="ce-world-section"><summary>建築アトラクション19</summary><div data-world-architecture></div></details>
+    </div>`;
   const $ = (selector) => dock.querySelector(selector);
   const statusEl = $('[data-status]');
   const modelFile = $('[data-model-file]');
-  const architecturePack = installArchitecturePack(api, editor, $('[data-panel="architecture"]'));
-  const cityFlightPack = installCityFlight(api, editor, $('[data-panel="cityflight"]'));
+  // The world tab is the single home for scenery, individual attractions and flight.
+  const architecturePack = installArchitecturePack(api, editor, $('[data-world-architecture]'));
+  const cityFlightPack = installCityFlight(api, editor, $('[data-world-cityflight]'));
+  // Reuse this add-on's GLB parser for the GeoFS aircraft URL; no second loader/library is needed.
+  api.loadGLBFromURL = async (url) => {
+    const response = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
+    if (!response.ok) throw new Error(`GLB取得失敗: HTTP ${response.status}`);
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength < 20 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) throw new Error('取得したファイルがGLB形式ではありません');
+    const file = new File([bytes], 'geo-fs-f3-7.glb', { type: 'model/gltf-binary' });
+    return loadGltf(file, [file]);
+  };
+
+  // Native-editor mountain quick mode: shown just above the first course drawing canvas.
+  const mountainBar = document.createElement('section');
+  mountainBar.className = 'ce-mountain-quick';
+  mountainBar.innerHTML = `
+    <div class="ce-mountain-head"><b>山岳コース</b><span>山と谷の間を縫うコースを自動生成します。</span></div>
+    <div class="ce-mountain-controls map-row">
+      <label>地形<select data-mountain-style><option value="alpine">アルプス山脈</option><option value="canyon">渓谷</option><option value="volcanic">火山地帯</option></select></label>
+      <label>山の高さ<input type="range" min="120" max="900" step="30" value="540" data-mountain-height><output data-mountain-height-label>540m</output></label>
+      <label>山岳範囲<input type="range" min="2400" max="12000" step="400" value="8000" data-mountain-width><output data-mountain-width-label>8,000m</output></label>
+      <label>コース形状<select data-mountain-route><option value="4">つづら折り</option><option value="1">S字・蛇行</option><option value="3">谷を回り込む</option></select></label>
+    </div>
+    <div class="ce-mountain-actions"><button type="button" class="chip" data-mountain-action="new">山岳コースを新規作成</button><button type="button" class="chip" data-mountain-action="scenery">現在のコースに山岳だけ追加</button><button type="button" class="chip" data-mountain-action="clear">山岳を削除</button></div>
+    <small class="ce-note" data-mountain-status>最初のコース作成画面から、山岳コースを作成できます。</small>
+  `;
+  const mountainStyle = document.createElement('style');
+  mountainStyle.id = 'ce-mountain-quick-style';
+  mountainStyle.textContent = `
+    .ce-mountain-quick{width:100%;box-sizing:border-box;margin:7px 0 9px;padding:8px;border:1px solid #d8e0e4;border-radius:7px;background:#f8faf9;color:#2b3a55;font:inherit}
+    .ce-mountain-quick[hidden]{display:none!important}.ce-mountain-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:6px}.ce-mountain-head b{font-size:13px}.ce-mountain-head span{font-size:11px;color:#66798a}
+    .ce-mountain-controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.ce-mountain-controls label{display:grid;gap:3px;min-width:0;font-size:11px;color:#40516b}.ce-mountain-controls select{height:30px;min-width:0;border:1px solid #b9c8d2;border-radius:6px;background:#fff;color:#2b3a55;padding:3px;font:inherit}.ce-mountain-controls input{width:100%;min-width:0;accent-color:#486d91}.ce-mountain-controls output{font-weight:700;color:#41566b}
+    .ce-mountain-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}.ce-mountain-actions button{min-height:30px;padding:4px 8px;font:700 11px system-ui}.ce-mountain-actions button[data-mountain-action="new"]{background:#e5edf3;border-color:#9eb1c1}.ce-mountain-quick .ce-note{display:block;margin-top:6px;font-size:10px;color:#66798a;line-height:1.4}
+    @media(max-width:620px){.ce-mountain-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.ce-mountain-actions button{flex:1 1 100%}}
+  `;
+  document.head.appendChild(mountainStyle);
+  if (editor.cvWrap) editor.cvWrap.before(mountainBar);
+  const originalEditorGoForMountain = editor.go;
+  editor.go = function(step) {
+    const result = originalEditorGoForMountain.call(this, step);
+    mountainBar.hidden = step !== 1;
+    return result;
+  };
+  const mountainLabel = (selector, value, suffix='m') => {
+    const el=mountainBar.querySelector(selector); if(el)el.textContent=`${Number(value).toLocaleString('ja-JP')}${suffix}`;
+  };
+  mountainBar.querySelector('[data-mountain-height]').addEventListener('input',e=>mountainLabel('[data-mountain-height-label]',e.target.value));
+  mountainBar.querySelector('[data-mountain-width]').addEventListener('input',e=>mountainLabel('[data-mountain-width-label]',e.target.value));
+  function mountainProfile(design, length) {
+    const count = helpers.H_SAMPLES || 96;
+    const target = Math.min(150, Math.max(12, length * 0.018));
+    const cycles = 2.15;
+    const smooth01 = x => { const t=clamp(x,0,1); return t*t*(3-2*t); };
+    return Array.from({length:count},(_,i)=>{
+      const u=i/(count-1);
+      const edge=smooth01(u*5)*smooth01((1-u)*5);
+      const wave=clamp(.53+.34*Math.sin(2*Math.PI*cycles*u- Math.PI/2)+.13*Math.sin(4*Math.PI*cycles*u+.4),.08,1);
+      return i===0||i===count-1?2:2+target*edge*wave;
+    });
+  }
+  mountainBar.addEventListener('click',e=>{
+    const button=e.target.closest('button[data-mountain-action]'); if(!button)return;
+    const action=button.dataset.mountainAction, d=editor.design;
+    const statusNode=mountainBar.querySelector('[data-mountain-status]');
+    const report=(message,bad=false)=>{statusNode.textContent=message;statusNode.style.color=bad?'#a83b2a':'#66798a';};
+    try{
+      if(action==='clear'){cityFlightPack.clearMountains();report('山岳地形を削除しました。コース形状と高さは維持します。');return;}
+      if(!d||!Array.isArray(d.pts))throw new Error('コース編集画面を開いてください。');
+      const height=Number(mountainBar.querySelector('[data-mountain-height]').value);
+      const areaWidth=Number(mountainBar.querySelector('[data-mountain-width]').value);
+      const style=mountainBar.querySelector('[data-mountain-style]').value;
+      const seed=(Date.now()>>>0)^Math.floor(Math.random()*0x7fffffff);
+      if(action==='new'){
+        const kind=Number(mountainBar.querySelector('[data-mountain-route]').value);
+        const starts=helpers.STARTS||[{v:0}];
+        const start=starts[Number(d.start)||0]||starts[0]||{v:0};
+        editor.record();
+        d.pts=helpers.randomStroke(seed,kind,start.v||0);
+        d.gm=[];
+        const length=helpers.polyLen?helpers.polyLen(d.pts):500;
+        d.hs=mountainProfile(d,length);
+        editor.refresh(true);editor.onChange?.();
+        editor.fitMapView();
+      }else if(d.pts.length<2){throw new Error('先にコースを描くか、「山岳コースを新規作成」を使ってください。');}
+      const result=cityFlightPack.makeMountainTerrain({style,height,areaWidth,seed});
+      report(`山岳コースを設定しました。${result.count}峰を生成。線路は山体と離して配置しています。`);
+      status(action==='new'?'山岳コースを新規作成しました。次へ進んで高さと仕掛けを調整できます。':'現在のコースに山岳地形を追加しました。');
+    }catch(error){console.error('[Mountain Course]',error);report(`エラー：${error.message||error}`,true);status(`山岳コースの作成に失敗しました：${error.message||error}`,true);}
+  });
+  mountainBar.hidden = editor.step !== 1;
 
   function status(message, bad = false) {
     statusEl.textContent = message;
@@ -873,7 +963,7 @@ export function installCoasterExpansion(api, helpers) {
     const zip=await makeStoreZip(entries);
     download(new Blob([zip],{type:'application/zip'}),`coaster_project_${Date.now()}.zip`);
     const cityInfo=cityFlightPack.serialize();
-    status(`プロジェクトZIPを保存しました。コース＋モデル${models.length}個＋都市街区${cityInfo?`${cityInfo.buildings}棟の設定`:'なし'}／合計 ${(zip.length/1024/1024).toFixed(1)}MB`);
+    status(`プロジェクトZIPを保存しました。コース＋モデル${models.length}個＋ワールド${cityInfo?(cityInfo.buildings?`${cityInfo.buildings}棟の都市`:cityInfo.mountain?'山岳地形':'設定あり'):'なし'}／合計 ${(zip.length/1024/1024).toFixed(1)}MB`);
   }
   async function importProjectZip() {
     const file=$('[data-project-file]').files&&$('[data-project-file]').files[0];
@@ -1238,7 +1328,7 @@ export function installCoasterExpansion(api, helpers) {
   mountNativeUI();
 
   api.expansion={
-    version:'7.0',models,architecture:architecturePack,cityFlight:cityFlightPack,
+    version:'8.1',models,architecture:architecturePack,cityFlight:cityFlightPack,
     exportGLB:async()=>{
       if(typeof api.createTrackExportGroup!=='function')throw new Error('GLB出力APIがありません');
       const built=api.createTrackExportGroup(editor.design);
@@ -1249,6 +1339,8 @@ export function installCoasterExpansion(api, helpers) {
       clearInterval(ridePoll);
       architecturePack.destroy();
       cityFlightPack.destroy();
+      editor.go = originalEditorGoForMountain;
+      mountainBar.remove(); mountainStyle.remove();
       rideDeck.remove();
       dock.remove();style.remove();editor.onChange=oldOnChange;
       editor.buildTools=originalBuildToolsForDestroy;

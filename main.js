@@ -1920,7 +1920,7 @@ if (DEBUG_OK) window.__rc = {
   encode, decode, randomStroke, defaultHeights, buildTrack, Sim, prepare, H_SAMPLES, BUDGET, FIELD, F,
 };
 
-// 拡張版：本番でもアドオンが実際のゲーム内部へ接続できるよう、必要なAPIだけ公開する。
+// 拡張版 v8：本番でも追加機能がゲーム内部へ接続できるよう、必要なAPIだけ公開する。
 // 既存のデバッグAPIとは別名・別オブジェクトにし、ゲームの通常動作は変えない。
 const coasterExpansionRuntime = {
   get editor() { return editor; },
@@ -1981,5 +1981,5 @@ const coasterExpansionRuntime = {
   },
 };
 window.__coasterExpansionRuntime = coasterExpansionRuntime;
-installCoasterExpansion(coasterExpansionRuntime, { FIELD, MAX_LEN, randomStroke, polyLen });
+installCoasterExpansion(coasterExpansionRuntime, { FIELD, MAX_LEN, randomStroke, polyLen, H_SAMPLES, STARTS });
 
