@@ -1,4 +1,4 @@
-/* Coaster City District + Flight Simulator v3.0
+/* Coaster City Grid + Terrain + Flight Simulator v4.0
  * Asphalt city ground, road traffic, close-but-clear buildings, and an original procedural jet.
  * Built for the Three.js runtime used by the original coaster game.
  */
@@ -289,8 +289,9 @@ export function installCityFlight(api, editor, panel) {
   function routeSamples(tr, limit = 1800) {
     const stride = Math.max(1, Math.floor(tr.n / limit));
     const out=[];
-    for(let i=0;i<tr.n;i+=stride) out.push({x:tr.px[i],z:tr.pz[i]});
-    out.push({x:tr.px[tr.n-1],z:tr.pz[tr.n-1]});
+    for(let i=0;i<tr.n;i+=stride) out.push({x:tr.px[i],y:tr.py[i],z:tr.pz[i],s:i*tr.L/tr.n});
+    const last=tr.n-1;
+    out.push({x:tr.px[last],y:tr.py[last],z:tr.pz[last],s:last*tr.L/tr.n});
     return out;
   }
   function buildingClearOfRoute(frame,w,d,samples,clearance=8) {
@@ -336,120 +337,211 @@ export function installCityFlight(api, editor, panel) {
     return {x,z,runwayHalfLength:900,spawn:{x,z:z-760,y:FLIGHT_GROUND_ALT,yaw:0}};
   }
   function makeCity(config = {}) {
-    if(cityRoot) disposeCity();
-    const tr=getTrack();
-    const root=new T.Group();root.name='CoasterWideCityDistrict';
-    const B=makeBatchBuilder(root);
-    colliders=[];traffic=[];
-    const total=tr.L;
-    const spacing=clamp(Number(config.spacing)||82,58,150);
-    const n=clamp(Math.ceil(total/spacing),12,84);
-    const step=total/n;
-    const frames=[];
-    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
-    for(let i=0;i<n;i++){
-      const f=frameAt(tr,(i+.5)*step);frames.push(f);
-      minX=Math.min(minX,f.x);maxX=Math.max(maxX,f.x);minZ=Math.min(minZ,f.z);maxZ=Math.max(maxZ,f.z);
-    }
-    const center={x:(minX+maxX)/2,z:(minZ+maxZ)/2,y:frames.reduce((sum,f)=>sum+f.y,0)/frames.length};
-    const density=config.density||'dense';
-    const areaWidth=clamp(Number(config.areaWidth)||10000,3000,16000);
-    const half=areaWidth/2;
-    const seedBase=config.seed||20261031;
-    const samples=routeSamples(tr,2400);
-    // First row is intentionally close to the ride. Roads occupy the gaps between rows.
-    const rows=density==='normal'
-      ? [{f:.014,every:1},{f:.065,every:2},{f:.14,every:2},{f:.27,every:3},{f:.44,every:3},{f:.64,every:4},{f:.84,every:5}]
-      : density==='ultra'
-        ? [{f:.0085,every:1},{f:.028,every:1},{f:.055,every:1},{f:.105,every:2},{f:.18,every:2},{f:.29,every:2},{f:.43,every:3},{f:.60,every:3},{f:.78,every:4},{f:.90,every:5}]
-        : [{f:.0085,every:1},{f:.035,every:1},{f:.075,every:2},{f:.14,every:2},{f:.23,every:2},{f:.36,every:3},{f:.53,every:3},{f:.72,every:4},{f:.89,every:5}];
-    const roadOffsets=getRoadOffsets(rows,half);
-    const groundY=.05;
-    for(let i=0;i<frames.length;i++){
-      const f=frames[i],seed=seedBase+i*179,r=rand(seed);
-      const crossStreet=i%8===3;
-      addRoads(B,f,step,groundY,areaWidth,roadOffsets,crossStreet);
-      // Street furniture and trees are placed outside the protected ride corridor.
+    if (cityRoot) disposeCity();
+    const tr = getTrack();
+    const root = new T.Group(); root.name = 'CoasterOrthogonalCityGrid';
+    const B = makeBatchBuilder(root);
+    colliders = []; traffic = [];
+    const samples = routeSamples(tr, 12000);
+    const total = tr.L;
+    const spacing = clamp(Number(config.spacing) || 145, 100, 210);
+    const density = ['normal','dense','ultra'].includes(config.density) ? config.density : 'dense';
+    const areaWidth = clamp(Number(config.areaWidth) || 10000, 3000, 16000);
+    const half = areaWidth * 0.5;
+    const seedBase = (Number(config.seed) || 20261031) >>> 0;
+    const rng = rand(seedBase);
+
+    // Align the street grid to the principal direction of the actual coaster route.
+    let mx=0,mz=0;
+    for (const q of samples) { mx += q.x; mz += q.z; }
+    mx /= samples.length; mz /= samples.length;
+    let xx=0,zz=0,xz=0;
+    for (const q of samples) { const x=q.x-mx,z=q.z-mz; xx+=x*x;zz+=z*z;xz+=x*z; }
+    const theta = 0.5 * Math.atan2(2*xz, xx-zz);
+    const ux=Math.cos(theta), uz=Math.sin(theta), vx=-uz, vz=ux;
+    const gridYaw=Math.atan2(-uz,ux);
+    const project = q => ({u:(q.x-mx)*ux+(q.z-mz)*uz, v:(q.x-mx)*vx+(q.z-mz)*vz});
+    const projected=samples.map(project);
+    const minU=Math.min(...projected.map(q=>q.u)), maxU=Math.max(...projected.map(q=>q.u));
+    const uStart=Math.floor((minU-760)/spacing)*spacing;
+    const uEnd=Math.ceil((maxU+760)/spacing)*spacing;
+    const vStart=-Math.ceil(half/spacing)*spacing;
+    const vEnd=Math.ceil(half/spacing)*spacing;
+    const nU=Math.max(1,Math.round((uEnd-uStart)/spacing));
+    const nV=Math.max(1,Math.round((vEnd-vStart)/spacing));
+    const uSpan=nU*spacing, vSpan=nV*spacing;
+    const midU=(uStart+uEnd)*0.5, midV=(vStart+vEnd)*0.5;
+    const point=(u,v)=>({x:mx+ux*u+vx*v,z:mz+uz*u+vz*v});
+    const center=point(midU,midV);
+    center.y=samples.reduce((a,q)=>a+(q.y||0),0)/samples.length;
+    const groundY=0.08, roadWidth=14.5, majorRoadWidth=21.5;
+    const roadCounts={u:0,v:0};
+    const areaColor=0x747b7e;
+
+    // A single grey paved urban ground plane; the street grid is continuous and orthogonal.
+    B.add('ground',center.x,groundY-0.42,center.z,uSpan+spacing,0.72,vSpan+spacing,gridYaw,areaColor);
+    const dashStep=34;
+    // Streets parallel to route's principal axis (u direction).
+    for(let j=0;j<=nV;j++){
+      const v=vStart+j*spacing;
+      const major=(j%5===0), rw=major?majorRoadWidth:roadWidth;
+      const p=point(midU,v);
+      B.add('asphalt',p.x,groundY-0.025,p.z,uSpan+spacing,0.20,rw,gridYaw,0x30363a);
       for(const side of [-1,1]){
-        if(i%2===0) addStreetTree(B,f,side*31,(i%3-1)*step*.18,5.8,seed+side*33,groundY);
-        const lp=worldFromLocal(f,side*29,0);
-        B.add('trim',lp.x,groundY+5.2,lp.z,.22,10.4,.22,f.yaw,0x56616a);
-        B.add('trim',lp.x+Math.cos(f.yaw)*1.8,groundY+10.25,lp.z-Math.sin(f.yaw)*1.8,3.8,.18,.22,f.yaw,0x65717a);
-        B.add('warm',lp.x+Math.cos(f.yaw)*1.8,groundY+10,lp.z-Math.sin(f.yaw)*1.8,1.4,.25,.5,f.yaw,0xffdda3);
-        // Leave a full cross-street slot clear of buildings every eight blocks.
-        if(crossStreet) continue;
-        for(let row=0;row<rows.length;row++){
-          const def=rows[row];
-          if(i%def.every!==0) continue;
-          const alongJitter=(r()-.5)*step*.12;
-          const lateral=half*def.f + (r()-.5)*Math.min(10,half*.006);
-          const w=(row<3?22:28)+r()*(row<3?13:24);
-          const d=clamp(step*(row<3?.62:.58),25,66)*(.9+r()*.18);
-          if(!buildingClearOfRoads(lateral,w,roadOffsets)) continue;
-          const p=worldFromLocal(f,side*lateral,alongJitter);
-          const bf={x:p.x,y:f.y,z:p.z,yaw:f.yaw};
-          // Keep a compact 12m surface-to-centreline safety gap; never bridge or cross the rail.
-          if(!buildingClearOfRoute(bf,w,d,samples,8)) continue;
-          if(!buildingClearOfBuildings(bf,w,d)) continue;
-          const baseHeight=36+r()*(row<3?115:190);
-          const routeHeight=Math.max(0,f.y);
-          const rise=row<3?38+r()*95:70+r()*230;
-          const h=Math.max(baseHeight,routeHeight+rise);
-          makeBuilding(B,root,bf,seed+side*31+row*809,{w,d,h,baseY:groundY,collider:true});
-          if(row<2 && r()>.55){
-            B.local(f,'trim',side*lateral,groundY+3.6,alongJitter,w+2,.45,d*.72,0x71858b);
-            B.local(f,'warm',side*lateral,groundY+3.9,alongJitter,w*.72,.13,d*.55,0xffd28e);
-          }
+        const ep=point(midU,v+side*(rw*.5-0.65));
+        B.add('roadMark',ep.x,groundY+0.085,ep.z,uSpan+spacing,0.035,0.18,gridYaw,0xe8e6dc);
+      }
+      if(major){
+        for(let u=uStart+12;u<uEnd-5;u+=dashStep){
+          const q=point(u,v); B.add('roadMark',q.x,groundY+0.09,q.z,5.2,0.035,0.22,gridYaw,0xe8d9a9);
+        }
+      } else {
+        for(let u=uStart+spacing*.32;u<uEnd;u+=spacing*2){
+          const q=point(u,v); B.add('roadMark',q.x,groundY+0.09,q.z,2.8,0.03,0.16,gridYaw,0xd8d4c5);
         }
       }
-      if(i%3===0){
-        for(const side of [-1,1]){
-          const p=worldFromLocal(f,side*(half*.94),0);
-          B.add('greenery',p.x,groundY-.43,p.z,24,.26,step*.6,f.yaw,0x506c4c);
-          for(let t=0;t<3;t++) addStreetTree(B,f,side*(half*.92),(t-1)*7,6.5,seed+i+t,groundY);
+      roadCounts.u++;
+    }
+    // Cross streets are built from the same exact grid coordinates, so intersections line up.
+    for(let i=0;i<=nU;i++){
+      const u=uStart+i*spacing;
+      const major=(i%5===0),rw=major?majorRoadWidth:roadWidth;
+      const p=point(u,midV);
+      B.add('asphalt',p.x,groundY-0.025,p.z,rw,0.20,vSpan+spacing,gridYaw,0x30363a);
+      for(const side of [-1,1]){
+        const ep=point(u+side*(rw*.5-0.65),midV);
+        B.add('roadMark',ep.x,groundY+0.085,ep.z,0.18,0.035,vSpan+spacing,gridYaw,0xe8e6dc);
+      }
+      if(major){
+        for(let v=vStart+10;v<vEnd-5;v+=dashStep){
+          const q=point(u,v);B.add('roadMark',q.x,groundY+0.09,q.z,0.22,0.035,5.2,gridYaw,0xe8d9a9);
+        }
+      }
+      roadCounts.v++;
+    }
+    // Curbs and zebra markings at major grid intersections.
+    for(let i=0;i<=nU;i+=5){
+      for(let j=0;j<=nV;j+=5){
+        const q=point(uStart+i*spacing,vStart+j*spacing);
+        for(let k=-3;k<=3;k++){
+          const a=point(uStart+i*spacing+k*2.1,vStart+j*spacing+(majorRoadWidth*.28));
+          B.add('roadMark',a.x,groundY+0.105,a.z,1.0,0.035,4.8,gridYaw,0xf4f1e8);
         }
       }
     }
-    const bounds={minX,minZ,maxX,maxZ};
+
+    // Spatial bins keep route-clearance checks fast on mobile. Distant blocks do not need
+    // rail tests; only cells within 340m of the route are searched and shifted toward it.
+    const cityRouteSpatial=buildRouteSpatial(samples,80);
+    function nearestRoute(x,z,maxDistance=340){
+      const cell=cityRouteSpatial.cell,gx=Math.floor(x/cell),gz=Math.floor(z/cell),r=Math.ceil(maxDistance/cell)+1;
+      let best=maxDistance*maxDistance,hit=null;
+      for(let ix=-r;ix<=r;ix++)for(let iz=-r;iz<=r;iz++){
+        const bucket=cityRouteSpatial.bins.get(`${gx+ix},${gz+iz}`);if(!bucket)continue;
+        for(const q of bucket){const dx=q.x-x,dz=q.z-z,d=dx*dx+dz*dz;if(d<best){best=d;hit=q;}}
+      }
+      return hit?{point:hit,distance:Math.sqrt(best)}:null;
+    }
+    const desiredOccupancy=density==='normal'?0.68:density==='ultra'?0.91:0.82;
+    const maxBuildings=density==='ultra'?1450:density==='normal'?760:1150;
+    // Thin the grid evenly when the requested district would exceed the mobile building budget.
+    const occupancy=Math.min(desiredOccupancy,maxBuildings/Math.max(1,nU*nV));
+    let buildingCount=0,parkCount=0;
+    for(let i=0;i<nU;i++){
+      for(let j=0;j<nV;j++){
+        const cellSeed=(seedBase + Math.imul(i+17,73856093) + Math.imul(j+31,19349663))>>>0;
+        const r=rand(cellSeed);
+        if(r()>occupancy || buildingCount>=maxBuildings) continue;
+        const u=uStart+(i+.5)*spacing, v=vStart+(j+.5)*spacing;
+        const base=point(u,v);
+        // A few complete city blocks are plazas rather than random decoration fragments.
+        if(r()<0.055){
+          B.add('greenery',base.x,groundY+0.12,base.z,spacing-roadWidth-8,0.25,spacing-roadWidth-8,gridYaw,0x58744f);
+          for(let t=0;t<4;t++){
+            const tx=(r()-.5)*(spacing-roadWidth-22),tz=(r()-.5)*(spacing-roadWidth-22);
+            const q=point(u+tx,v+tz);
+            B.add('trim',q.x,groundY+3.0,q.z,.65,6,.65,gridYaw,0x72543b);
+            B.add('leaf',q.x,groundY+7.2,q.z,5.0,5.4,5.0,gridYaw,[0x426d48,0x557e51,0x6b8e5a][Math.floor(r()*3)]);
+          }
+          parkCount++; continue;
+        }
+        let w=Math.min(spacing-roadWidth-16, 68+r()*20);
+        let d=Math.min(spacing-roadWidth-16, 68+r()*20);
+        const bx=base.x,bz=base.z;
+        const nearest=nearestRoute(bx,bz);
+        // Keep every building on its exact city-block centre. Near the coaster, shrink the
+        // footprint symmetrically instead of sliding the building out of its orderly row.
+        const frame={x:bx,y:0,z:bz,yaw:gridYaw};
+        if(nearest){
+          let safe=false;
+          for(let scale=1;scale>=0.28;scale-=0.06){
+            const testW=w*scale,testD=d*scale;
+            if(buildingClearOfRoute(frame,testW,testD,samples,8)){
+              w=testW;d=testD;safe=true;break;
+            }
+          }
+          if(!safe)continue;
+        }
+        if(!buildingClearOfBuildings(frame,w,d))continue;
+        const baseHeight=42+r()*150;
+        const nearbyTrackHeight=nearest?Math.max(0,nearest.point.y||0):0;
+        const h=clamp(Math.max(baseHeight,nearbyTrackHeight+35+r()*115),42,1900);
+        makeBuilding(B,root,frame,cellSeed,{w,d,h,baseY:groundY,collider:true});
+        buildingCount++;
+      }
+    }
+
+    // Airport apron and runway are placed outside the regular city grid.
+    const corners=[point(uStart-spacing,vStart-spacing),point(uEnd+spacing,vStart-spacing),point(uStart-spacing,vEnd+spacing),point(uEnd+spacing,vEnd+spacing)];
+    const bounds={minX:Math.min(...corners.map(q=>q.x)),maxX:Math.max(...corners.map(q=>q.x)),minZ:Math.min(...corners.map(q=>q.z)),maxZ:Math.max(...corners.map(q=>q.z))};
     const airport=addAirport(B,root,bounds,center);
     B.finish();
-    // Vehicles are placed in the exact road lanes, with opposing traffic and rotating wheels.
+
+    // Build detailed cars once; each vehicle follows one straight, marked street lane.
     const carPaint=[0xb93f3b,0xe3e5e2,0x3f6f9a,0xd5a849,0x2d343a,0x597d69,0x7d7194];
     const carGlass=new T.MeshStandardMaterial({color:0x54717d,roughness:.18,metalness:.2});
     const tireMat=new T.MeshStandardMaterial({color:0x171b1e,roughness:.86});
     const hubMat=new T.MeshStandardMaterial({color:0x9aa4a9,metalness:.72,roughness:.3});
     const headMat=new T.MeshBasicMaterial({color:0xfff1c8});
     const tailMat=new T.MeshBasicMaterial({color:0xff362b});
-    const trafficCount=clamp(Math.round(total/95),24,48);
+    const trafficCount=clamp(Math.round((nU+nV)*0.24),28,48);
+    const usableRoadU=Array.from({length:nV+1},(_,j)=>vStart+j*spacing);
+    const usableRoadV=Array.from({length:nU+1},(_,i)=>uStart+i*spacing);
     for(let i=0;i<trafficCount;i++){
       const paint=new T.MeshStandardMaterial({color:carPaint[i%carPaint.length],roughness:.48,metalness:.22});
-      const car=new T.Group();car.name=`CityTraffic_${i+1}`;
+      const car=new T.Group();car.name=`CityGridTraffic_${i+1}`;
       const van=i%7===5;
       const body=new T.Mesh(new T.BoxGeometry(van?2.45:2.25,.78,van?5.5:4.7),paint);body.position.y=.76;car.add(body);
       const hood=new T.Mesh(new T.BoxGeometry(2.12,.30,1.25),paint);hood.position.set(0,1.06,1.52);car.add(hood);
       const cabin=new T.Mesh(new T.BoxGeometry(van?2.05:1.78,van?1.05:.78,van?2.85:2.35),carGlass);cabin.position.set(0,1.42,-.28);car.add(cabin);
       const roof=new T.Mesh(new T.BoxGeometry(van?2.0:1.72,.13,van?2.65:2.15),paint);roof.position.set(0,1.98,-.32);car.add(roof);
-      for(const side of [-1,1]){
-        for(const z of [-1.25,.95]){
-          const lamp=new T.Mesh(new T.BoxGeometry(.10,.22,.32),z>0?headMat:tailMat);lamp.position.set(side*.94,.74,z>0?2.27:-2.27);car.add(lamp);
-        }
-      }
       const wheels=[];
       for(const x of [-1.12,1.12])for(const z of [-1.52,1.52]){
-        const w=new T.Mesh(new T.CylinderGeometry(.43,.43,.23,14),tireMat);w.rotation.z=Math.PI/2;w.position.set(x,.42,z);car.add(w);wheels.push(w);
+        const wheel=new T.Mesh(new T.CylinderGeometry(.43,.43,.23,14),tireMat);wheel.rotation.z=Math.PI/2;wheel.position.set(x,.42,z);car.add(wheel);wheels.push(wheel);
         const hub=new T.Mesh(new T.CylinderGeometry(.19,.19,.245,12),hubMat);hub.rotation.z=Math.PI/2;hub.position.set(x*1.005,.42,z);car.add(hub);
       }
+      for(const side of [-1,1])for(const z of [-1,1]){
+        const lamp=new T.Mesh(new T.BoxGeometry(.10,.22,.32),z>0?headMat:tailMat);lamp.position.set(side*.94,.74,z>0?2.27:-2.27);car.add(lamp);
+      }
       root.add(car);
-      const side=i%2?1:-1, roadIndex=(i*3+Math.floor(i/4))%Math.min(roadOffsets.length,7);
+      const axis=i%2===0?'u':'v';
       const direction=i%4<2?1:-1;
-      const lane=(direction>0?-3.0:3.0)*(side<0?-1:1);
-      traffic.push({group:car,wheels,s:(i/trafficCount)*total,side,offset:roadOffsets[roadIndex],lane,direction,speed:8+(i%7)*1.25,groundY});
+      const lane=(i%4<2?-3.6:3.6);
+      const roadIndex=axis==='u'?(i*7+3)%usableRoadU.length:(i*5+1)%usableRoadV.length;
+      const fixed=axis==='u'?usableRoadU[roadIndex]:usableRoadV[roadIndex];
+      const start=uStart;
+      const length=axis==='u'?uSpan:vSpan;
+      const travel=rng()*length;
+      traffic.push({group:car,wheels,axis,fixed,lane,direction,start,vStart,length,travel,speed:7.5+(i%8)*1.25,gridYaw,ux,uz,vx,vz,origin:{x:mx,z:mz},groundY});
     }
     scene.add(root);cityRoot=root;
-    cityConfig={density,spacing,areaWidth,seed:seedBase,buildings:colliders.length,airport,roads:roadOffsets.length*2,vehicles:traffic.length,ground:'asphalt-grey',clearance:8};
-    routeCache={tr,center,bounds,airport,total,n,areaWidth,roadOffsets};
+    cityConfig={density,spacing,areaWidth,seed:seedBase,buildings:buildingCount,parks:parkCount,airport,roads:roadCounts.u+roadCounts.v,vehicles:traffic.length,ground:'orthogonal-grey-asphalt',clearance:8};
+    routeCache={tr,center,bounds,airport,total,n:Math.max(nU,nV),areaWidth,roadOffsets:[],grid:{uStart,uEnd,vStart,vEnd,spacing,gridYaw}};
     cityBuildCount++;cityClock=0;
-    setStatus(`都市を生成：${colliders.length}棟／道路${roadOffsets.length*2}本＋交差道路／走行車両${traffic.length}台。灰色舗装、レールとの干渉なし。`);
+    const worldFar=Math.max(14000,areaWidth*2.8);
+    if(scene.fog)scene.fog.far=Math.max(scene.fog.far||0,worldFar);
+    if(api.camera.far<worldFar){api.camera.far=worldFar;api.camera.updateProjectionMatrix();}
+    setStatus(`整然とした都市を生成：${buildingCount}棟／公園${parkCount}区画／格子道路${roadCounts.u+roadCounts.v}本／車両${traffic.length}台。レール周辺は8m以上を確保。`);
     return cityConfig;
   }
   function disposeCity(){
@@ -466,15 +558,21 @@ export function installCityFlight(api, editor, panel) {
   function updateCity(dt){
     if(!cityRoot||!routeCache)return;
     cityClock+=dt;
-    const tr=routeCache.tr;
     for(const item of traffic){
-      item.s=(item.s+item.speed*dt*item.direction)%tr.L;
-      if(item.s<0)item.s+=tr.L;
-      const f=frameAt(tr,item.s);
-      const lateral=item.side*item.offset+item.lane;
-      const p=worldFromLocal(f,lateral,0);
-      item.group.position.set(p.x,item.groundY+.01,p.z);
-      item.group.rotation.y=f.yaw+(item.direction<0?Math.PI:0);
+      item.travel=(item.travel+item.speed*dt*item.direction)%item.length;
+      if(item.travel<0)item.travel+=item.length;
+      let u,v,yaw;
+      if(item.axis==='u'){
+        u=item.start+item.travel;v=item.fixed+item.lane;
+        yaw=Math.atan2(item.ux,item.uz);
+      }else{
+        u=item.fixed+item.lane;v=item.vStart+item.travel;
+        yaw=Math.atan2(item.vx,item.vz);
+      }
+      const x=item.origin.x+item.ux*u+item.vx*v;
+      const z=item.origin.z+item.uz*u+item.vz*v;
+      item.group.position.set(x,item.groundY+0.01,z);
+      item.group.rotation.y=yaw+(item.direction<0?Math.PI:0);
       for(const wheel of item.wheels)wheel.rotation.x+=item.speed*dt/.43*item.direction;
     }
   }
@@ -506,105 +604,167 @@ export function installCityFlight(api, editor, panel) {
     geometries.forEach(g=>g.dispose());materialsToDispose.forEach(m=>m.dispose&&m.dispose());
     mountainRoot=null;mountainConfig=null;mountainClock=0;
   }
-  function mountainGeometry(seed,radius,height,style){
-    const r=rand(seed), seg=18, rings=8;
-    const positions=[0,height,0], colors=[];
-    const low=style==='volcanic'?new T.Color(0x423d39):style==='canyon'?new T.Color(0x826b54):new T.Color(0x526d58);
-    const mid=style==='volcanic'?new T.Color(0x62534b):style==='canyon'?new T.Color(0xb18b65):new T.Color(0x74816e);
-    const high=style==='volcanic'?new T.Color(0x292a2d):style==='canyon'?new T.Color(0xc9a77e):new T.Color(0xe2e6e0);
-    colors.push(high.r,high.g,high.b);
-    const randA=Array.from({length:seg},()=>.82+r()*.34);
-    for(let ring=1;ring<=rings;ring++){
-      const t=ring/rings, radial=Math.pow(t,.92), ridgeFade=Math.pow(1-t,1.35);
-      for(let j=0;j<seg;j++){
-        const a=j/seg*Math.PI*2;
-        const ridge=1+(Math.sin(a*3+seed*.013)*.075+Math.sin(a*7+seed*.007)*.035)*t;
-        const rr=radius*radial*randA[j]*ridge;
-        const x=Math.cos(a)*rr, z=Math.sin(a)*rr*.88;
-        const localNoise=(r()-.5)*.12;
-        const y=height*ridgeFade*(.88+localNoise+Math.sin(a*4+seed)*.035);
-        positions.push(x,y,z);
-        const hNorm=y/Math.max(1,height);
-        const col=low.clone().lerp(mid,clamp(hNorm*2.25,0,1));
-        if(style==='alpine'&&hNorm>.73)col.lerp(high,clamp((hNorm-.73)/.27,0,1));
-        if(style==='volcanic'&&hNorm>.83)col.lerp(high,clamp((hNorm-.83)/.17,0,1));
-        colors.push(col.r,col.g,col.b);
-      }
-    }
-    const indices=[];
-    for(let j=0;j<seg;j++)indices.push(0,1+j,1+(j+1)%seg);
-    for(let ring=0;ring<rings-1;ring++){
-      const a0=1+ring*seg,b0=a0+seg;
-      for(let j=0;j<seg;j++){
-        const j1=(j+1)%seg;
-        indices.push(a0+j,b0+j,a0+j1,a0+j1,b0+j,b0+j1);
-      }
-    }
-    const geo=new T.BufferGeometry();
-    geo.setAttribute('position',new T.Float32BufferAttribute(positions,3));
-    geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));
-    geo.setIndex(indices);geo.computeVertexNormals();geo.computeBoundingSphere();
-    return geo;
+  function mountainSeedNoise(seed,a,b){
+    const v=Math.sin(a*12.9898+b*78.233+(seed>>>0)*0.000013)*43758.5453;
+    return (v-Math.floor(v))*2-1;
   }
-  function mountainClearOfRoute(x,z,radius,samples){
-    // Mountain vertices can reach ~1.29x the nominal radius after ridge distortion.
-    // Reserve an additional 45m beyond the actual footprint, not just the nominal radius.
-    const limit=radius*1.30+45,limit2=limit*limit;
-    for(const p of samples){const dx=p.x-x,dz=p.z-z;if(dx*dx+dz*dz<limit2)return false;}
-    return true;
+  function mountainSmooth(t){t=clamp(t,0,1);return t*t*(3-2*t);}
+  function mountainRiverCenter(s,half,seed,side){
+    return half*(.56+.045*Math.sin(s*.00135+(seed%971)*.013+side)+.018*Math.sin(s*.0031+side*2.7));
+  }
+  function mountainHeightAt(s,offset,side,routeY,half,peak,style,seed){
+    const phase=s*.00115+(seed%997)*.017+side*.9;
+    const n1=Math.sin(phase*1.7+offset*.0018),n2=Math.sin(phase*3.2-offset*.0041),n3=mountainSeedNoise(seed,Math.floor(s/23),Math.floor(offset/17));
+    const river=mountainRiverCenter(s,half,seed,side);
+    const riverWidth=Math.max(34,half*.035);
+    const riverBlend=Math.exp(-Math.pow((offset-river)/riverWidth,2));
+    const start=8;
+    const wallRise=Math.max(85,routeY*.78,peak*.18);
+    const inner=wallRise*mountainSmooth((offset-start)/Math.max(120,half*.045));
+    const ridge1=half*(style==='canyon'?.24:style==='karst'?.20:style==='volcanic'?.34:.29)+half*.035*Math.sin(phase*1.1);
+    const ridge2=half*(style==='plateau'?.79:.82)+half*.035*Math.sin(phase*.8+2.0);
+    const sigma1=half*(style==='karst'?.065:style==='volcanic'?.09:style==='plateau'?.13:.15);
+    const sigma2=half*.13;
+    const g1=Math.exp(-Math.pow((offset-ridge1)/Math.max(1,sigma1),2));
+    const g2=Math.exp(-Math.pow((offset-ridge2)/Math.max(1,sigma2),2));
+    const variation=.78+.15*n1+.055*n2+.035*n3;
+    let ridgeA=peak*g1*variation;
+    let ridgeB=peak*.56*g2*(.82+.16*n2);
+    if(style==='karst') ridgeA*=.40+.60*Math.pow(Math.abs(Math.sin(phase*4.3+offset*.006)),1.4);
+    if(style==='plateau') ridgeA*=.72+.28*mountainSmooth(1-Math.abs(offset-ridge1)/(sigma1*1.05));
+    if(style==='volcanic'){
+      const crater=Math.exp(-Math.pow((offset-ridge1*.96)/(half*.035),2));
+      ridgeA*=1-.42*crater;
+      ridgeB*=.65;
+    }
+    if(style==='forest') {ridgeA*=.78;ridgeB*=.66;}
+    if(style==='canyon') {ridgeA*=1.10;ridgeB*=.92;}
+    if(style==='rugged') {ridgeA*=1.08;ridgeB*=.84;}
+    const rough=peak*(style==='forest'?.012:.035)*(n1*.55+n2*.3+n3*.15);
+    let height=inner+ridgeA+ridgeB+rough;
+    const valleyFloor=5+2.2*Math.sin(phase*2.6)+Math.abs(n3)*1.6;
+    height=height*(1-.985*riverBlend)+valleyFloor*riverBlend;
+    if(style==='canyon'){
+      const strata=Math.sin((height+offset*.16)*.055+phase)*7;
+      height+=strata*(1-riverBlend);
+    }
+    if(style==='plateau'){
+      const mesa=mountainSmooth((offset-ridge1+sigma1*.9)/(sigma1*.35))*mountainSmooth((ridge1+sigma1*.9-offset)/(sigma1*.35));
+      height=Math.max(height,ridgeA*.78*mesa+inner);
+    }
+    return Math.max(0,height);
+  }
+  function buildRouteSpatial(samples,cell=20){
+    const bins=new Map();
+    for(const p of samples){const x=Math.floor(p.x/cell),z=Math.floor(p.z/cell),key=`${x},${z}`;let a=bins.get(key);if(!a)bins.set(key,a=[]);a.push(p);}
+    return {bins,cell};
+  }
+  function isNearRoute(spatial,x,z,minDistance=7.5){
+    const c=spatial.cell,gx=Math.floor(x/c),gz=Math.floor(z/c),r=Math.ceil(minDistance/c)+1,d2=minDistance*minDistance;
+    for(let ix=-r;ix<=r;ix++)for(let iz=-r;iz<=r;iz++){
+      const bucket=spatial.bins.get(`${gx+ix},${gz+iz}`);if(!bucket)continue;
+      for(const p of bucket){const dx=p.x-x,dz=p.z-z;if(dx*dx+dz*dz<d2)return true;}
+    }
+    return false;
   }
   function makeMountainTerrain(config={}){
     disposeMountains();
-    const tr=getTrack(), style=['alpine','canyon','volcanic'].includes(config.style)?config.style:'alpine';
-    const maxHeight=clamp(Number(config.height)||360,100,900);
-    const areaWidth=clamp(Number(config.areaWidth)||10000,3000,16000), half=areaWidth/2;
-    const seed=config.seed||((Date.now()>>>0)^0x61c88647);
-    const root=new T.Group();root.name='CoasterMountainRange';
-    const samples=routeSamples(tr,2600), segmentCount=clamp(Math.ceil(tr.L/360),8,34);
-    const rows=[{f:.05,r:110,h:.32,every:1},{f:.10,r:160,h:.48,every:1},{f:.18,r:220,h:.68,every:1},{f:.31,r:300,h:.88,every:2},{f:.47,r:380,h:1.0,every:2},{f:.67,r:460,h:.84,every:3},{f:.85,r:520,h:.70,every:4}];
-    const mountainMat=new T.MeshStandardMaterial({vertexColors:true,roughness:.98,metalness:0,flatShading:true});
-    const treeMat=new T.MeshStandardMaterial({color:0x315a43,roughness:1});
-    const treeGeo=new T.ConeGeometry(1,1,7);
-    const used=[];let made=0;
-    for(let i=0;i<segmentCount;i++){
-      const f=frameAt(tr,(i+.5)*tr.L/segmentCount),rng=rand(seed+i*97);
-      for(const side of [-1,1]){
-        for(let row=0;row<rows.length;row++){
-          const def=rows[row];if(i%def.every!==0)continue;
-          const offset=half*def.f+(rng()-.5)*Math.min(20,half*.012);
-          const p=worldFromLocal(f,side*offset,(rng()-.5)*tr.L/segmentCount*.4);
-          const radius=def.r*(.82+rng()*.48);
-          if(!mountainClearOfRoute(p.x,p.z,radius,samples))continue;
-          let overlaps=false;
-          for(const q of used){const rr=radius+q.r*.62,dx=p.x-q.x,dz=p.z-q.z;if(dx*dx+dz*dz<rr*rr){overlaps=true;break;}}
-          if(overlaps)continue;
-          const routeY=Math.max(0,f.y);
-          const height=Math.max(maxHeight*def.h,routeY+maxHeight*(.22+def.h*.35))*(.82+rng()*.34);
-          const geo=mountainGeometry(seed+i*173+row*997+side*29,radius,height,style);
-          const mesh=new T.Mesh(geo,mountainMat);
-          mesh.position.set(p.x,-2,p.z);mesh.rotation.y=f.yaw;mesh.castShadow=false;mesh.receiveShadow=true;
-          mesh.name=`Mountain_${made+1}`;root.add(mesh);used.push({x:p.x,z:p.z,r:radius});made++;
-          // A few conifers at the foothills give scale without filling the ride corridor.
-          if(style==='alpine'&&row<3&&made<180){
-            for(let t=0;t<4;t++){
-              const tx=(rng()-.5)*radius*1.18,tz=(rng()-.5)*radius*1.18;
-              const scale=2.2+rng()*1.8,tree=new T.Mesh(treeGeo,treeMat);
-              tree.scale.set(scale,7+rng()*7,scale);
-              const radial=Math.min(.93,Math.hypot(tx,tz)/Math.max(1,radius));
-              tree.position.set(tx,height*Math.pow(Math.max(.05,1-radial),1.32)+1,tz);
-              tree.castShadow=false;mesh.add(tree);
-            }
+    const tr=getTrack();
+    const styles=['alpine','forest','canyon','volcanic','karst','plateau','rugged','snow'];
+    const style=styles.includes(config.style)?config.style:'alpine';
+    const maxHeight=clamp(Number(config.height)||900,160,1800);
+    const areaWidth=clamp(Number(config.areaWidth)||10000,3000,16000),half=areaWidth*.5;
+    const seed=(Number(config.seed)||((Date.now()>>>0)^0x61c88647))>>>0;
+    const route=routeSamples(tr,14000),spatial=buildRouteSpatial(route,20);
+    const root=new T.Group();root.name='CoasterContinuousMountainValley';
+    const palettes={
+      alpine:[0x354b38,0x7b817b,0xe7eceb],forest:[0x244c31,0x57734a,0x9a9d7d],canyon:[0x65483a,0xb07850,0xe3c08a],
+      volcanic:[0x292c2b,0x65554d,0x9c7a59],karst:[0x365b43,0x9a9b8a,0xe1e2d8],plateau:[0x5b6043,0x9c855d,0xc4aa7d],
+      rugged:[0x3d4d48,0x777b76,0xc0c4bf],snow:[0x40515d,0x9daeb7,0xf0f5f7]
+    };
+    const cLow=new T.Color(palettes[style][0]),cMid=new T.Color(palettes[style][1]),cHigh=new T.Color(palettes[style][2]);
+    const material=new T.MeshStandardMaterial({vertexColors:true,roughness:style==='volcanic'?.96:.99,metalness:0,side:T.DoubleSide,flatShading:false});
+    const waterMaterial=new T.MeshStandardMaterial({color:0x3988ad,roughness:.16,metalness:.16,transparent:true,opacity:.9,side:T.DoubleSide,emissive:0x082b3a,emissiveIntensity:.18});
+    const stations=clamp(Math.ceil(tr.L/18),150,520),lateralSegments=48;
+    const geometries=[];
+    const routeHigh=Math.max(0,...route.map(p=>p.y||0));
+    const peakBase=Math.max(maxHeight,routeHigh+Math.min(420,maxHeight*.42));
+    const heightAt=(s,offset,side,routeY)=>mountainHeightAt(s,offset,side,routeY,half,peakBase,style,seed);
+    for(const side of [-1,1]){
+      const positions=[],colors=[],indices=[];
+      for(let i=0;i<=stations;i++){
+        const s=tr.L*i/stations,frame=frameAt(tr,s);
+        const routeY=Math.max(0,frame.y||0);
+        for(let j=0;j<=lateralSegments;j++){
+          const t=j/lateralSegments;
+          let offset=8+(half-8)*Math.pow(t,1.52);
+          let p=worldFromLocal(frame,side*offset,0);
+          // Every terrain vertex is checked against the complete route, including crossings and tight turns.
+          for(let attempt=0;attempt<7&&isNearRoute(spatial,p.x,p.z,7.5);attempt++){
+            offset+=7.5;p=worldFromLocal(frame,side*offset,0);
           }
+          const y=heightAt(s,offset,side,routeY)-2;
+          positions.push(p.x,y,p.z);
+          let hNorm=clamp(y/Math.max(1,peakBase),0,1);
+          let color=cLow.clone().lerp(cMid,clamp(hNorm*1.8,0,1));
+          color.lerp(cHigh,clamp((hNorm-.52)*1.7,0,.92));
+          const rugged=mountainSeedNoise(seed+side*31,Math.floor(s/28),Math.floor(offset/21));
+          color.multiplyScalar(.94+((rugged+1)*.03));
+          if((style==='alpine'||style==='snow')&&hNorm>.78)color.lerp(new T.Color(0xf3f5f5),clamp((hNorm-.78)/.18,0,1));
+          if(style==='volcanic'&&rugged>.68)color.lerp(new T.Color(0x3a2b27),.28);
+          colors.push(color.r,color.g,color.b);
         }
       }
+      for(let i=0;i<stations;i++)for(let j=0;j<lateralSegments;j++){
+        const a=i*(lateralSegments+1)+j,b=a+lateralSegments+1;
+        indices.push(a,b,a+1,a+1,b,b+1);
+      }
+      const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(positions,3));geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));geo.setIndex(indices);geo.computeVertexNormals();geo.computeBoundingSphere();
+      const mesh=new T.Mesh(geo,material);mesh.name=`MountainTerrain_${side>0?'Right':'Left'}_${style}`;mesh.frustumCulled=true;root.add(mesh);geometries.push(geo);
+
+      // A winding river occupies the low valley in each mountain flank.
+      const riverPositions=[],riverIndices=[],riverWidth=clamp(areaWidth*.0014,9,22),riverSteps=stations;
+      for(let i=0;i<=riverSteps;i++){
+        const s=tr.L*i/riverSteps,frame=frameAt(tr,s),routeY=Math.max(0,frame.y||0);
+        const centerOffset=mountainRiverCenter(s,half,seed,side);
+        const floorY=heightAt(s,centerOffset,side,routeY)-2;
+        for(const edge of [-.5,.5]){
+          const off=centerOffset+edge*riverWidth;
+          const p=worldFromLocal(frame,side*off,0);
+          riverPositions.push(p.x,Math.max(1,floorY+1.1),p.z);
+        }
+      }
+      for(let i=0;i<riverSteps;i++){const a=i*2;riverIndices.push(a,a+2,a+1,a+1,a+2,a+3);}
+      const riverGeo=new T.BufferGeometry();riverGeo.setAttribute('position',new T.Float32BufferAttribute(riverPositions,3));riverGeo.setIndex(riverIndices);riverGeo.computeVertexNormals();riverGeo.computeBoundingSphere();
+      const river=new T.Mesh(riverGeo,waterMaterial);river.name=`MountainRiver_${side>0?'Right':'Left'}`;root.add(river);geometries.push(riverGeo);
     }
-    if(!made){mountainMat.dispose();treeMat.dispose();treeGeo.dispose();throw new Error('山岳を配置できませんでした。コースを少し長くするか、範囲を広げてください。');}
+
+    // Tree belts are instanced so large mountain ranges remain practical on phones.
+    if(['alpine','forest','karst','rugged','snow'].includes(style)){
+      const treeCount=style==='forest'?1500:style==='alpine'?1000:style==='snow'?650:850;
+      const treeGeo=new T.ConeGeometry(1,1,7);
+      const treeMat=new T.MeshStandardMaterial({color:style==='snow'?0x315443:0x31583a,roughness:1});
+      const trees=new T.InstancedMesh(treeGeo,treeMat,treeCount);trees.name='MountainForestTreeBelt';
+      const dummy=new T.Object3D(),rng=rand(seed^0x5f3759df);let placed=0;
+      for(let i=0;i<treeCount;i++){
+        const side=rng()<.5?-1:1,s=rng()*tr.L,frame=frameAt(tr,s);
+        const off=half*(.12+rng()*.30);
+        if(Math.abs(off-mountainRiverCenter(s,half,seed,side))<120)continue;
+        const p=worldFromLocal(frame,side*off,0);
+        if(isNearRoute(spatial,p.x,p.z,75))continue;
+        const base=heightAt(s,off,side,Math.max(0,frame.y||0))-1;
+        const h=(style==='snow'?5:7)+rng()*(style==='forest'?18:12),w=h*(.24+rng()*.10);
+        dummy.position.set(p.x,base+h*.5,p.z);dummy.rotation.set(0,rng()*Math.PI*2,0);dummy.scale.set(w,h,w);dummy.updateMatrix();trees.setMatrixAt(placed++,dummy.matrix);
+      }
+      trees.count=placed;trees.instanceMatrix.needsUpdate=true;root.add(trees);
+    }
+    if(!root.children.length){material.dispose();waterMaterial.dispose();throw new Error('山岳メッシュを生成できませんでした。');}
     scene.add(root);mountainRoot=root;mountainClock=0;
-    mountainConfig={enabled:true,style,height:maxHeight,areaWidth,seed,count:made};
-    const worldFar=Math.max(12000,areaWidth*2.6);
+    mountainConfig={enabled:true,style,height:maxHeight,areaWidth,seed,count:root.children.filter(o=>o.name.startsWith('MountainTerrain')).length,riverCount:2,routeClearance:7.5};
+    const worldFar=Math.max(14000,areaWidth*2.8);
     if(scene.fog)scene.fog.far=Math.max(scene.fog.far||0,worldFar);
     if(api.camera.far<worldFar){api.camera.far=worldFar;api.camera.updateProjectionMatrix();}
-    setStatus(`山岳地形を生成：${made}峰／山岳範囲約${Math.round(areaWidth)}m。線路の通過帯から山体を分離しています。`);
+    setStatus(`山岳地形を生成：${style}／連続山体2面・河川2本・樹林帯。線路との最小平面離隔7.5mを検査しました。`);
     return mountainConfig;
   }
   function clearMountains(){disposeMountains();setStatus('山岳地形を削除しました。コースの高さと形はそのままです。');}
@@ -1017,12 +1177,12 @@ export function installCityFlight(api, editor, panel) {
   function destroy(){closeFlight();stopCityPreview();removeTrackFromView();disposeCity();disposeMountains();if(flightUI)flightUI.remove();if(previewExitUI)previewExitUI.remove();const st=document.getElementById('city-flight-style');if(st)st.remove();unitBox.dispose();unitCylinder.dispose();Object.values(materials).forEach(m=>m.dispose());for(const mat of signMaterials.values())mat.dispose();signMaterials.clear();for(const tex of signTextures.values())tex.dispose();signTextures.clear();}
 
   panel.innerHTML=`
-    <div class="cf-intro"><b>都市街区・フライト</b><span>灰色の舗装地面に道路網と走行車両を生成。コース脇のビルを近づけつつ、レールへの貫通は防ぎます。</span></div>
-    <div class="cf-options"><label>街区密度<select data-cf-density><option value="normal">標準</option><option value="dense" selected>高密度</option><option value="ultra">超高密度</option></select></label><label>ブロック間隔<input type="range" min="58" max="150" step="4" value="82" data-cf-spacing><output data-cf-spacing-label>82m</output></label><label>街区全体の幅<input type="range" min="3000" max="16000" step="500" value="10000" data-cf-width><output data-cf-width-label>10,000m</output></label></div>
+    <div class="cf-intro"><b>都市街区・フライト</b><span>道路を直交格子に整理し、建物は同じ街区間隔で整然と配置。コースに近い区画は建物を寄せ、レールの通過帯だけを空けます。</span></div>
+    <div class="cf-options"><label>街区密度<select data-cf-density><option value="normal">標準</option><option value="dense" selected>高密度</option><option value="ultra">超高密度</option></select></label><label>街区間隔<input type="range" min="100" max="210" step="5" value="145" data-cf-spacing><output data-cf-spacing-label>145m</output></label><label>都市の横幅<input type="range" min="3000" max="16000" step="500" value="10000" data-cf-width><output data-cf-width-label>10,000m</output></label></div>
     <div class="cf-buttons"><button data-cf-action="generate">街区を生成</button><button data-cf-action="refresh">街並みを再生成</button><button data-cf-action="clear">街区を削除</button></div>
     <div class="cf-buttons"><button data-cf-action="flight">フライトシム開始</button><button data-cf-action="focus">都市プレビュー</button></div>
     <div class="cf-stats" data-cf-stats>まだ街区は生成されていません。</div>
-    <div class="cf-note">街区幅は最大16km。道路は複数列＋交差道路、車両は道路の車線上を往復します。地面は灰色アスファルトです。建物はコース脇へ近づけますが、レールと建物の間隔は近接配置のうえ、衝突しないよう検査します。フライト機はThree.jsで生成するオリジナル旅客機で、外部通信・CORSは不要です。</div>
+    <div class="cf-note">街区は最大16km幅の直交グリッド。道路・交差点・車線・横断歩道を同じ格子で整列し、車は実際の道路レーンを走行します。地面は灰色舗装。建物は規則的な街区配置を保ち、コース側へ可能な範囲で寄せて、線路の通過帯は空けます。フライト機はThree.jsで生成するオリジナル旅客機で、外部通信・CORSは不要です。</div>
   `;
   const panelStyle=document.createElement('style');panelStyle.id='city-flight-panel-style';panelStyle.textContent=`
     .cf-intro{display:grid;gap:4px;padding:9px 10px;border:1px solid #d2dcdf;border-radius:7px;background:#edf3f5;color:#2b3a55;font-size:12px;line-height:1.5}.cf-intro b{font-size:14px}.cf-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:9px 0}.cf-options label{display:grid;gap:4px;font-size:12px;color:#40516b}.cf-options select{height:32px;border:1px solid #b9c8d2;border-radius:6px;background:#fff;color:#2b3a55;padding:4px}.cf-options input{width:100%;accent-color:#486d91}.cf-options output{font-weight:700;color:#41566b}.cf-buttons{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0}.cf-buttons button{flex:1 1 135px;min-height:32px;padding:5px 8px;border:1px solid #c4d0d8;border-radius:6px;background:#fff;color:#2b3a55;font:700 12px system-ui}.cf-buttons button[data-cf-action="generate"],.cf-buttons button[data-cf-action="flight"]{background:#e5edf3;border-color:#9eb1c1}.cf-stats{margin-top:8px;padding:8px;border:1px solid #d8e0e4;border-radius:6px;background:#fff;color:#41566b;font-size:12px;white-space:pre-wrap}.cf-note{margin-top:7px;color:#66798a;font-size:11px;line-height:1.5}@media(max-width:520px){.cf-options{grid-template-columns:1fr}.cf-buttons button{flex:1 1 100%;}}

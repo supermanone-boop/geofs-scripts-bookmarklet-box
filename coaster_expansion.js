@@ -1,6 +1,6 @@
 import { installArchitecturePack } from './coaster_architecture.js';
 import { installCityFlight } from './coaster_city_flight.js';
-/* Coaster Expansion v9.0
+/* Coaster Expansion v10.0
  * Loaded by the game's main.js. Adds tools inside the native editor UI.
  * GLB/glTF importer supports triangle meshes, PBR base color/metal/roughness,
  * transforms and base-color textures. Skins, morph targets and animation are not imported.
@@ -168,8 +168,8 @@ export function installCoasterExpansion(api, helpers) {
   mountainBar.innerHTML = `
     <div class="ce-mountain-head"><b>山岳コース</b><span>山と谷の間を縫うコースを自動生成します。</span></div>
     <div class="ce-mountain-controls map-row">
-      <label>地形<select data-mountain-style><option value="alpine">アルプス山脈</option><option value="canyon">渓谷</option><option value="volcanic">火山地帯</option></select></label>
-      <label>山の高さ<input type="range" min="120" max="900" step="30" value="540" data-mountain-height><output data-mountain-height-label>540m</output></label>
+      <label>山岳タイプ<select data-mountain-style><option value="alpine">アルプス・氷雪山脈</option><option value="forest">森林山地</option><option value="canyon">大峡谷・赤岩</option><option value="volcanic">火山帯</option><option value="karst">石灰岩の尖峰</option><option value="plateau">メサ・台地</option><option value="rugged">岩稜山脈</option><option value="snow">高山・雪嶺</option></select></label>
+      <label>山の高さ<input type="range" min="160" max="1800" step="40" value="900" data-mountain-height><output data-mountain-height-label>900m</output></label>
       <label>山岳範囲<input type="range" min="2400" max="16000" step="500" value="10000" data-mountain-width><output data-mountain-width-label>10,000m</output></label>
       <label>コース形状<select data-mountain-route><option value="4">つづら折り</option><option value="1">S字・蛇行</option><option value="3">谷を回り込む</option></select></label>
     </div>
@@ -200,7 +200,7 @@ export function installCoasterExpansion(api, helpers) {
   mountainBar.querySelector('[data-mountain-width]').addEventListener('input',e=>mountainLabel('[data-mountain-width-label]',e.target.value));
   function mountainProfile(design, length) {
     const count = helpers.H_SAMPLES || 96;
-    const target = Math.min(150, Math.max(12, length * 0.018));
+    const target = Math.min(520, Math.max(120, length * 0.055));
     const cycles = 2.15;
     const smooth01 = x => { const t=clamp(x,0,1); return t*t*(3-2*t); };
     return Array.from({length:count},(_,i)=>{
@@ -235,11 +235,77 @@ export function installCoasterExpansion(api, helpers) {
         editor.fitMapView();
       }else if(d.pts.length<2){throw new Error('先にコースを描くか、「山岳コースを新規作成」を使ってください。');}
       const result=cityFlightPack.makeMountainTerrain({style,height,areaWidth,seed});
-      report(`山岳コースを設定しました。${result.count}峰を生成。線路は山体と離して配置しています。`);
-      status(action==='new'?'山岳コースを新規作成しました。次へ進んで高さと仕掛けを調整できます。':'現在のコースに山岳地形を追加しました。');
+      report(`山岳コースを設定しました。連続山体${result.count}面・河川${result.riverCount}本。線路脇まで地形を寄せています。`);
+      status(action==='new'?'山岳コースを新規作成しました。尾根・谷・河川の間を通る初期コースです。':'現在のコースに連続山体と河川を追加しました。');
     }catch(error){console.error('[Mountain Course]',error);report(`エラー：${error.message||error}`,true);status(`山岳コースの作成に失敗しました：${error.message||error}`,true);}
   });
   mountainBar.hidden = editor.step !== 1;
+
+  // Native title screen course chooser. The original three title actions remain in their order;
+  // only the first action opens these three course types.
+  const startButton=document.getElementById('btn-start');
+  const startPicker=document.createElement('section');
+  startPicker.id='rc-course-mode-picker';startPicker.hidden=true;
+  startPicker.innerHTML=`
+    <div class="rc-cmp-head"><b>コースの種類を選択</b><span>作るワールドに合わせた初期コースを用意します。</span></div>
+    <button type="button" data-start-mode="mountain"><b>山岳コース</b><small>尾根・谷・川の間を走る山岳地形</small></button>
+    <button type="button" data-start-mode="city"><b>都市コース</b><small>整然とした道路網と高層ビル街</small></button>
+    <button type="button" data-start-mode="normal"><b>普通のコース</b><small>景観を選ばず、いつもの編集画面から作成</small></button>
+    <button type="button" class="rc-cmp-back" data-start-cancel>戻る</button>`;
+  startButton.insertAdjacentElement('afterend',startPicker);
+  const startPickerStyle=document.createElement('style');startPickerStyle.id='rc-course-mode-picker-style';
+  startPickerStyle.textContent=`
+    #rc-course-mode-picker{width:min(100%,520px);box-sizing:border-box;margin:7px auto 9px;padding:9px;border:1px solid #cfd9dd;border-radius:9px;background:rgba(251,248,239,.98);box-shadow:0 2px 9px #25364b16;color:#2b3a55;font:inherit;text-align:left}
+    #rc-course-mode-picker[hidden]{display:none!important}
+    #rc-course-mode-picker .rc-cmp-head{display:grid;gap:3px;margin:1px 2px 7px}
+    #rc-course-mode-picker .rc-cmp-head b{font-size:13px;color:#2b3a55}
+    #rc-course-mode-picker .rc-cmp-head span{font-size:10px;color:#66798a}
+    #rc-course-mode-picker button{display:grid;gap:2px;width:100%;min-height:42px;margin:5px 0;padding:7px 10px;border:1px solid #c4d0d8;border-radius:7px;background:#fff;color:#2b3a55;text-align:left;font:inherit;cursor:pointer}
+    #rc-course-mode-picker button:hover{background:#edf3f5;border-color:#9eb1c1}
+    #rc-course-mode-picker button b{font-size:12px;font-weight:800}
+    #rc-course-mode-picker button small{font-size:10px;color:#66798a}
+    #rc-course-mode-picker button.rc-cmp-back{display:block;width:auto;min-height:29px;margin:7px 0 0 auto;padding:4px 12px;background:#f5f5f1;font-size:11px}
+  `;
+  document.head.appendChild(startPickerStyle);
+  window.__coasterShowStartModePicker=()=>{startPicker.hidden=false;};
+  window.__coasterHideStartModePicker=()=>{startPicker.hidden=true;};
+  window.__coasterCreateStartDesign=(mode)=>{
+    if(mode==='normal')return null;
+    const seed=(Date.now()>>>0)^Math.floor(Math.random()*0x7fffffff);
+    const kind=mode==='mountain'?4:2;
+    const start=(helpers.STARTS&&helpers.STARTS[0]&&helpers.STARTS[0].v)||0;
+    const pts=helpers.randomStroke(seed,kind,start);
+    const length=helpers.polyLen?helpers.polyLen(pts):900;
+    let hs;
+    if(mode==='mountain'){
+      const count=helpers.H_SAMPLES||96,target=Math.min(520,Math.max(120,length*.055));
+      const smooth=x=>{const t=clamp(x,0,1);return t*t*(3-2*t);};
+      hs=Array.from({length:count},(_,i)=>{const u=i/(count-1),edge=smooth(u*5)*smooth((1-u)*5),wave=clamp(.53+.34*Math.sin(2*Math.PI*2.15*u-Math.PI/2)+.13*Math.sin(4*Math.PI*2.15*u+.4),.08,1);return i===0||i===count-1?2:2+target*edge*wave;});
+    }else hs=helpers.autoHeights?helpers.autoHeights({pts},18,42):null;
+    return {pts,hs,gm:[],mat:1,bar:1,cars:4,start:0};
+  };
+  window.__coasterAfterStartMode=(mode)=>{
+    try{
+      cityFlightPack.clearCity();cityFlightPack.clearMountains();
+      if(mode==='city'){
+        const result=cityFlightPack.makeCity({density:'dense',spacing:145,areaWidth:10000,seed:(Date.now()>>>0)});
+        status(`都市コースを準備しました。${result.buildings}棟、格子道路${result.roads}本、車両${result.vehicles}台。`);
+      }else if(mode==='mountain'){
+        const result=cityFlightPack.makeMountainTerrain({style:'alpine',height:1100,areaWidth:10000,seed:(Date.now()>>>0)});
+        status(`山岳コースを準備しました。${result.style}地形・河川付き。コースは山体の近くを通ります。`);
+      }else status('普通のコースを作成します。');
+    }catch(error){console.error('[Course Start Mode]',error);status(`景観の準備に失敗しました：${error.message||error}`,true);}
+  };
+  window.__coasterClearStartModeWorld=()=>{try{cityFlightPack.clearCity();cityFlightPack.clearMountains();}catch(error){console.warn('[Course Start Mode cleanup]',error);}};
+  startPicker.addEventListener('click',event=>{
+    const cancel=event.target.closest('[data-start-cancel]');
+    if(cancel){startPicker.hidden=true;return;}
+    const button=event.target.closest('[data-start-mode]');if(!button)return;
+    const mode=button.dataset.startMode;
+    startPicker.hidden=true;
+    window.__coasterPendingStartMode=mode;
+    startButton.click();
+  });
 
   function status(message, bad = false) {
     statusEl.textContent = message;
@@ -1320,7 +1386,7 @@ export function installCoasterExpansion(api, helpers) {
   mountNativeUI();
 
   api.expansion={
-    version:'9.0',models,architecture:architecturePack,cityFlight:cityFlightPack,
+    version:'10.0',models,architecture:architecturePack,cityFlight:cityFlightPack,
     exportGLB:async()=>{
       if(typeof api.createTrackExportGroup!=='function')throw new Error('GLB出力APIがありません');
       const built=api.createTrackExportGroup(editor.design);
@@ -1332,7 +1398,7 @@ export function installCoasterExpansion(api, helpers) {
       architecturePack.destroy();
       cityFlightPack.destroy();
       editor.go = originalEditorGoForMountain;
-      mountainBar.remove(); mountainStyle.remove();
+      mountainBar.remove(); mountainStyle.remove(); startPicker.remove(); startPickerStyle.remove(); delete window.__coasterShowStartModePicker; delete window.__coasterHideStartModePicker; delete window.__coasterCreateStartDesign; delete window.__coasterAfterStartMode; delete window.__coasterClearStartModeWorld;
       rideDeck.remove();
       dock.remove();style.remove();editor.onChange=oldOnChange;
       editor.buildTools=originalBuildToolsForDestroy;

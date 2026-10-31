@@ -23,7 +23,7 @@ const GAME_URL = location.origin + location.pathname.replace(/index\.html$/, '')
 const HASHTAG = 'ジェットコースターを作ろう';
 const SAVE_KEY = 'rc_design';
 // ゲームのバージョン（タイトル画面の右下に出す）。public/coaster/ のソースを変えるコミットごとに末尾（パッチ）を 1 つ上げる
-const VERSION = '1.2.0 + 拡張6.0';
+const VERSION = '1.2.0 + 拡張10.0';
 const verEl = document.getElementById('ver');
 if (verEl) verEl.textContent = `ver ${VERSION}`;
 
@@ -861,6 +861,9 @@ editor.onChange = () => saveDesign(editor.design);
 
 function toTitle() {
   sound.roll(0);
+  window.__coasterPendingStartMode = 'choose';
+  if (typeof window.__coasterHideStartModePicker === 'function') window.__coasterHideStartModePicker();
+  if (typeof window.__coasterClearStartModeWorld === 'function') window.__coasterClearStartModeWorld();
   setMode('title');
   replay = false;
   history.replaceState(null, '', location.pathname);
@@ -1537,11 +1540,26 @@ document.getElementById('btn-totitle').addEventListener('click', () => {
   sound.sfx('tap');
   toTitle();
 });
+// Start screen: the native 'コースをつくる' button opens the three course modes.
+window.__coasterPendingStartMode = 'choose';
 document.getElementById('btn-start').addEventListener('click', () => {
+  const selectedMode = window.__coasterPendingStartMode || 'choose';
+  window.__coasterPendingStartMode = 'choose';
   sound.sfx('tap');
+  if (selectedMode === 'choose' && typeof window.__coasterShowStartModePicker === 'function') {
+    window.__coasterShowStartModePicker();
+    return;
+  }
+  const mode = selectedMode === 'choose' ? 'normal' : selectedMode;
   favId = null;
   editor.setIncidents([]);
-  openEditor(newDesign(), 1);
+  const prepared = typeof window.__coasterCreateStartDesign === 'function'
+    ? window.__coasterCreateStartDesign(mode)
+    : null;
+  openEditor(prepared || newDesign(), 1);
+  if (typeof window.__coasterAfterStartMode === 'function') {
+    window.__coasterAfterStartMode(mode);
+  }
 });
 document.getElementById('btn-continue').addEventListener('click', () => {
   sound.sfx('tap');
@@ -1981,5 +1999,5 @@ const coasterExpansionRuntime = {
   },
 };
 window.__coasterExpansionRuntime = coasterExpansionRuntime;
-installCoasterExpansion(coasterExpansionRuntime, { FIELD, MAX_LEN, randomStroke, polyLen, H_SAMPLES, STARTS });
+installCoasterExpansion(coasterExpansionRuntime, { FIELD, MAX_LEN, randomStroke, polyLen, autoHeights, H_SAMPLES, STARTS });
 
