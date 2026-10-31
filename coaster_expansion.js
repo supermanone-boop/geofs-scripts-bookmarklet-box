@@ -1,3 +1,4 @@
+import { installArchitecturePack } from './coaster_architecture.js';
 /* Coaster Expansion v4.1
  * Loaded by the game's main.js. Adds tools inside the native editor UI.
  * GLB/glTF importer supports triangle meshes, PBR base color/metal/roughness,
@@ -67,6 +68,7 @@ export function installCoasterExpansion(api, helpers) {
       <button type="button" class="chip" data-tab="model" aria-selected="false">モデル配置</button>
       <button type="button" class="chip" data-tab="save" aria-selected="false">保存・出力</button>
       <button type="button" class="chip" data-tab="power" aria-selected="false">追加26機能</button>
+      <button type="button" class="chip" data-tab="architecture" aria-selected="false">建築アトラクション19</button>
     </div>
     <div class="ce-status note" data-status role="status">準備完了。追加機能は元の編集画面に統合されています。</div>
     <div class="ce-panel" data-panel="course">
@@ -146,10 +148,12 @@ export function installCoasterExpansion(api, helpers) {
           <small class="ce-note">22 速度・高度・G・走行時間のライブ計器／23 カメラ切替／24 再生速度／25 一時停止／26 自己ベストとランダムミッション</small>
         </section>
       </div>
-    </div>`;
+    </div>
+    <div class="ce-panel" data-panel="architecture" hidden></div>`;
   const $ = (selector) => dock.querySelector(selector);
   const statusEl = $('[data-status]');
   const modelFile = $('[data-model-file]');
+  const architecturePack = installArchitecturePack(api, editor, $('[data-panel="architecture"]'));
 
   function status(message, bad = false) {
     statusEl.textContent = message;
@@ -860,7 +864,7 @@ export function installCoasterExpansion(api, helpers) {
       const g=m.group;
       modelData.push({name:m.name,mainName:m.mainName||m.name,assets:assetRefs,transform:{position:g.position.toArray(),rotation:g.rotation.toArray(),scale:g.scale.toArray()}});
     }
-    const payload={format:'coaster-expansion-project',version:2,createdAt:new Date().toISOString(),design:d,models:modelData};
+    const payload={format:'coaster-expansion-project',version:3,createdAt:new Date().toISOString(),design:d,models:modelData,architecture:architecturePack.serialize()};
     entries.unshift({name:'project.json',data:new TextEncoder().encode(JSON.stringify(payload,null,2))});
     const zip=await makeStoreZip(entries);
     download(new Blob([zip],{type:'application/zip'}),`coaster_project_${Date.now()}.zip`);
@@ -872,7 +876,7 @@ export function installCoasterExpansion(api, helpers) {
     const archive=await readProjectZip(file), raw=archive.get('project.json');
     if(!raw) throw new Error('project.json がありません。このZIPは対応プロジェクトではありません');
     const payload=JSON.parse(new TextDecoder().decode(raw));
-    if(payload.format!=='coaster-expansion-project'||payload.version!==2) throw new Error('対応していないプロジェクト形式です');
+    if(payload.format!=='coaster-expansion-project'||![2,3].includes(payload.version)) throw new Error('対応していないプロジェクト形式です');
     const d=payload.design;
     if(!d||!Array.isArray(d.pts)||d.pts.length<2||d.pts.length>8192) throw new Error('コース設計データが不正です');
     for(const p of d.pts) if(!Array.isArray(p)||!Number.isFinite(p[0])||!Number.isFinite(p[1])||p[0]<FIELD.x0||p[0]>FIELD.x1||p[1]<FIELD.z0||p[1]>FIELD.z1) throw new Error('敷地外の座標が含まれています');
@@ -900,6 +904,7 @@ export function installCoasterExpansion(api, helpers) {
     models.splice(0,models.length,...pending);
     for(const m of models) api.scene3d.add(m.group);
     selectedModel=models.length?0:-1;
+    architecturePack.restore(payload.version>=3 ? (payload.architecture||[]) : []);
     editor.open(nd,1); editor.fitMapView(); editor.onChange&&editor.onChange();
     refreshModelList();
     status(`プロジェクトを読み込みました。モデル ${models.length}個／コース ${Math.round(polyLen(nd.pts)).toLocaleString()}m`);
@@ -1227,15 +1232,16 @@ export function installCoasterExpansion(api, helpers) {
   mountNativeUI();
 
   api.expansion={
-    version:'4.0',models,
+    version:'5.0',models,architecture:architecturePack,
     exportGLB:async()=>{
       if(typeof api.createTrackExportGroup!=='function')throw new Error('GLB出力APIがありません');
       const built=api.createTrackExportGroup(editor.design);
-      try{return await exportGLB(flattenMeshes([built.group,...models.map(m=>m.group)]));}
+      try{return await exportGLB(flattenMeshes([built.group,...models.map(m=>m.group),...architecturePack.getMeshes()]));}
       finally{built.group.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose&&m.dispose());}});}
     },
     destroy(){
       clearInterval(ridePoll);
+      architecturePack.destroy();
       rideDeck.remove();
       dock.remove();style.remove();editor.onChange=oldOnChange;
       editor.buildTools=originalBuildToolsForDestroy;
