@@ -344,7 +344,7 @@ export class Editor {
       this.hint.textContent = !drawn ? '指で山を描こう！ 描きにくければ「おまかせ」' : d.start > 0 ? '指でなぞると高さが変わる。駅を出てすぐ発射で一気に加速します' : '指でなぞると高さが変わる。最初の坂は巻き上げ（チェーン）で登ります';
       this.btnNext.disabled = !drawn;
     } else if (this.step === 3) {
-      this.hint.textContent = 'しかけを選んで、図をタップして置く（置いたものをタップで外す）。置かなくても走れます';
+      this.hint.textContent = `しかけを選んで、図をタップして置く（置いたものをタップで外す）。${d.gm.length}/${MAX_GIMMICKS}個・置かなくても走れます`;
       this.btnNext.disabled = !p;
     } else {
       this.hint.textContent = '線路の強さ・安全バー・車両の数・スタートのしかたで、結果が大きく変わります';
@@ -1282,7 +1282,10 @@ export class Editor {
       const u = X.toU(sx);
       // 近くのしかけをタップ → 外す
       const near = d.gm.findIndex((g) => Math.abs(X.ux(g.u) - sx) < 16);
-      if (near < 0 && d.gm.length >= MAX_GIMMICKS) this.undoStack.pop(); // 何も変わらない
+      if (near < 0 && d.gm.length >= MAX_GIMMICKS) {
+        this.undoStack.pop(); // 何も変わらない
+        this.toast(`しかけは最大${MAX_GIMMICKS}個です`, '', 'warn', 1800);
+      }
       if (near >= 0) {
         d.gm.splice(near, 1);
         sound.sfx('erase');

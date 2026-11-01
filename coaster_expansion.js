@@ -187,10 +187,11 @@ export function installCoasterExpansion(api, helpers) {
   `;
   document.head.appendChild(mountainStyle);
   if (editor.cvWrap) editor.cvWrap.before(mountainBar);
+  let activeCourseMode = 'normal';
   const originalEditorGoForMountain = editor.go;
   editor.go = function(step) {
     const result = originalEditorGoForMountain.call(this, step);
-    mountainBar.hidden = step !== 1;
+    mountainBar.hidden = activeCourseMode !== 'mountain' || step !== 1;
     return result;
   };
   const mountainLabel = (selector, value, suffix='m') => {
@@ -239,73 +240,93 @@ export function installCoasterExpansion(api, helpers) {
       status(action==='new'?'山岳コースを新規作成しました。尾根・谷・河川の間を通る初期コースです。':'現在のコースに連続山体と河川を追加しました。');
     }catch(error){console.error('[Mountain Course]',error);report(`エラー：${error.message||error}`,true);status(`山岳コースの作成に失敗しました：${error.message||error}`,true);}
   });
-  mountainBar.hidden = editor.step !== 1;
 
-  // Native title screen course chooser. The original three title actions remain in their order;
-  // only the first action opens these three course types.
-  const startButton=document.getElementById('btn-start');
-  const startPicker=document.createElement('section');
-  startPicker.id='rc-course-mode-picker';startPicker.hidden=true;
-  startPicker.innerHTML=`
-    <div class="rc-cmp-head"><b>コースの種類を選択</b><span>作るワールドに合わせた初期コースを用意します。</span></div>
-    <button type="button" data-start-mode="mountain"><b>山岳コース</b><small>尾根・谷・川の間を走る山岳地形</small></button>
-    <button type="button" data-start-mode="city"><b>都市コース</b><small>整然とした道路網と高層ビル街</small></button>
-    <button type="button" data-start-mode="normal"><b>普通のコース</b><small>景観を選ばず、いつもの編集画面から作成</small></button>
-    <button type="button" class="rc-cmp-back" data-start-cancel>戻る</button>`;
-  startButton.insertAdjacentElement('afterend',startPicker);
-  const startPickerStyle=document.createElement('style');startPickerStyle.id='rc-course-mode-picker-style';
-  startPickerStyle.textContent=`
-    #rc-course-mode-picker{width:min(100%,520px);box-sizing:border-box;margin:7px auto 9px;padding:9px;border:1px solid #cfd9dd;border-radius:9px;background:rgba(251,248,239,.98);box-shadow:0 2px 9px #25364b16;color:#2b3a55;font:inherit;text-align:left}
-    #rc-course-mode-picker[hidden]{display:none!important}
-    #rc-course-mode-picker .rc-cmp-head{display:grid;gap:3px;margin:1px 2px 7px}
-    #rc-course-mode-picker .rc-cmp-head b{font-size:13px;color:#2b3a55}
-    #rc-course-mode-picker .rc-cmp-head span{font-size:10px;color:#66798a}
-    #rc-course-mode-picker button{display:grid;gap:2px;width:100%;min-height:42px;margin:5px 0;padding:7px 10px;border:1px solid #c4d0d8;border-radius:7px;background:#fff;color:#2b3a55;text-align:left;font:inherit;cursor:pointer}
-    #rc-course-mode-picker button:hover{background:#edf3f5;border-color:#9eb1c1}
-    #rc-course-mode-picker button b{font-size:12px;font-weight:800}
-    #rc-course-mode-picker button small{font-size:10px;color:#66798a}
-    #rc-course-mode-picker button.rc-cmp-back{display:block;width:auto;min-height:29px;margin:7px 0 0 auto;padding:4px 12px;background:#f5f5f1;font-size:11px}
+  // Replace the old one-button -> three-choice flow with three direct title actions.
+  mountainBar.hidden = true;
+  const startButton = document.getElementById('btn-start');
+  if (!startButton) throw new Error('タイトル画面の「コースをつくる」ボタンが見つかりません。');
+  const startModeMenu = document.createElement('div');
+  startModeMenu.id = 'rc-course-mode-buttons';
+  startModeMenu.setAttribute('role', 'group');
+  startModeMenu.setAttribute('aria-label', 'コースの種類');
+  const startModes = [
+    ['mountain', '山岳コース', '尾根・谷・川の間を走る山岳地形'],
+    ['city', '都市のコース', '道路網・高層ビル・走行する車がある街'],
+    ['normal', 'ふつうのコース', '景観を追加せず、標準の編集画面で作成'],
+  ];
+  for (const [mode, title, description] of startModes) {
+    const button = startButton.cloneNode(false);
+    button.removeAttribute('id');
+    button.type = 'button';
+    button.classList.add('rc-course-mode-button');
+    button.dataset.courseMode = mode;
+    button.setAttribute('aria-label', `${title}。${description}`);
+    button.innerHTML = `<span>${title}</span><small>${description}</small>`;
+    button.addEventListener('click', () => {
+      window.__coasterPendingStartMode = mode;
+      // The original element is detached but retains main.js's click listener.
+      startButton.click();
+    });
+    startModeMenu.appendChild(button);
+  }
+  startButton.replaceWith(startModeMenu);
+  const startModeStyle = document.createElement('style');
+  startModeStyle.id = 'rc-course-mode-buttons-style';
+  startModeStyle.textContent = `
+    #rc-course-mode-buttons{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;width:100%;max-width:520px;margin:7px auto 9px;box-sizing:border-box;grid-column:1/-1;flex:1 1 100%}
+    #rc-course-mode-buttons .rc-course-mode-button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:100%;min-width:0;min-height:49px;padding:8px 12px;box-sizing:border-box;text-align:center;line-height:1.25;cursor:pointer}
+    #rc-course-mode-buttons .rc-course-mode-button>span{font:inherit;font-weight:800}
+    #rc-course-mode-buttons .rc-course-mode-button>small{display:block;font:500 10px/1.35 system-ui,sans-serif;opacity:.82}
+    #rc-course-mode-buttons .rc-course-mode-button:focus-visible{outline:3px solid #7aaac1;outline-offset:2px}
   `;
-  document.head.appendChild(startPickerStyle);
-  window.__coasterShowStartModePicker=()=>{startPicker.hidden=false;};
-  window.__coasterHideStartModePicker=()=>{startPicker.hidden=true;};
-  window.__coasterCreateStartDesign=(mode)=>{
-    if(mode==='normal')return null;
-    const seed=(Date.now()>>>0)^Math.floor(Math.random()*0x7fffffff);
-    const kind=mode==='mountain'?4:2;
-    const start=(helpers.STARTS&&helpers.STARTS[0]&&helpers.STARTS[0].v)||0;
-    const pts=helpers.randomStroke(seed,kind,start);
-    const length=helpers.polyLen?helpers.polyLen(pts):900;
+  document.head.appendChild(startModeStyle);
+
+  function applyCourseModeUI(mode, focusTab = true) {
+    activeCourseMode = ['mountain', 'city', 'normal'].includes(mode) ? mode : 'normal';
+    document.body.dataset.coasterCourseMode = activeCourseMode;
+    const worldTab = dock.querySelector('[data-tab="world"]');
+    worldTab.hidden = activeCourseMode !== 'city';
+    worldTab.textContent = '都市・建築・フライト';
+    worldTab.title = activeCourseMode === 'city' ? '都市コース専用の街区・建築・フライト設定' : '';
+    mountainBar.hidden = activeCourseMode !== 'mountain' || editor.step !== 1;
+    if (focusTab) setTab(activeCourseMode === 'city' ? 'world' : 'course');
+  }
+
+  window.__coasterCreateStartDesign = (mode) => {
+    if (mode === 'normal') return null;
+    const seed = (Date.now() >>> 0) ^ Math.floor(Math.random() * 0x7fffffff);
+    const kind = mode === 'mountain' ? 4 : 2;
+    const start = (helpers.STARTS && helpers.STARTS[0] && helpers.STARTS[0].v) || 0;
+    const pts = helpers.randomStroke(seed, kind, start);
+    const length = helpers.polyLen ? helpers.polyLen(pts) : 900;
     let hs;
-    if(mode==='mountain'){
-      const count=helpers.H_SAMPLES||96,target=Math.min(520,Math.max(120,length*.055));
-      const smooth=x=>{const t=clamp(x,0,1);return t*t*(3-2*t);};
-      hs=Array.from({length:count},(_,i)=>{const u=i/(count-1),edge=smooth(u*5)*smooth((1-u)*5),wave=clamp(.53+.34*Math.sin(2*Math.PI*2.15*u-Math.PI/2)+.13*Math.sin(4*Math.PI*2.15*u+.4),.08,1);return i===0||i===count-1?2:2+target*edge*wave;});
-    }else hs=helpers.autoHeights?helpers.autoHeights({pts},18,42):null;
-    return {pts,hs,gm:[],mat:1,bar:1,cars:4,start:0};
+    if (mode === 'mountain') {
+      const count = helpers.H_SAMPLES || 96, target = Math.min(520, Math.max(120, length * .055));
+      const smooth = x => { const t = clamp(x, 0, 1); return t * t * (3 - 2 * t); };
+      hs = Array.from({ length: count }, (_, i) => { const u = i / (count - 1), edge = smooth(u * 5) * smooth((1 - u) * 5), wave = clamp(.53 + .34 * Math.sin(2 * Math.PI * 2.15 * u - Math.PI / 2) + .13 * Math.sin(4 * Math.PI * 2.15 * u + .4), .08, 1); return i === 0 || i === count - 1 ? 2 : 2 + target * edge * wave; });
+    } else hs = helpers.autoHeights ? helpers.autoHeights({ pts }, 18, 42) : null;
+    return { pts, hs, gm: [], mat: 1, bar: 1, cars: 4, start: 0 };
   };
-  window.__coasterAfterStartMode=(mode)=>{
-    try{
-      cityFlightPack.clearCity();cityFlightPack.clearMountains();
-      if(mode==='city'){
-        const result=cityFlightPack.makeCity({density:'dense',spacing:145,areaWidth:10000,seed:(Date.now()>>>0)});
+  window.__coasterAfterStartMode = (mode) => {
+    applyCourseModeUI(mode);
+    try {
+      cityFlightPack.clearCity();
+      cityFlightPack.clearMountains();
+      if (mode === 'city') {
+        const result = cityFlightPack.makeCity({ density: 'dense', spacing: 145, areaWidth: 10000, seed: (Date.now() >>> 0) });
         status(`都市コースを準備しました。${result.buildings}棟、格子道路${result.roads}本、車両${result.vehicles}台。`);
-      }else if(mode==='mountain'){
-        const result=cityFlightPack.makeMountainTerrain({style:'alpine',height:1100,areaWidth:10000,seed:(Date.now()>>>0)});
+      } else if (mode === 'mountain') {
+        const result = cityFlightPack.makeMountainTerrain({ style: 'alpine', height: 1100, areaWidth: 10000, seed: (Date.now() >>> 0) });
         status(`山岳コースを準備しました。${result.style}地形・河川付き。コースは山体の近くを通ります。`);
-      }else status('普通のコースを作成します。');
-    }catch(error){console.error('[Course Start Mode]',error);status(`景観の準備に失敗しました：${error.message||error}`,true);}
+      } else status('普通のコースを作成します。');
+    } catch (error) { console.error('[Course Start Mode]', error); status(`景観の準備に失敗しました：${error.message || error}`, true); }
   };
-  window.__coasterClearStartModeWorld=()=>{try{cityFlightPack.clearCity();cityFlightPack.clearMountains();}catch(error){console.warn('[Course Start Mode cleanup]',error);}};
-  startPicker.addEventListener('click',event=>{
-    const cancel=event.target.closest('[data-start-cancel]');
-    if(cancel){startPicker.hidden=true;return;}
-    const button=event.target.closest('[data-start-mode]');if(!button)return;
-    const mode=button.dataset.startMode;
-    startPicker.hidden=true;
-    window.__coasterPendingStartMode=mode;
-    startButton.click();
-  });
+  window.__coasterClearStartModeWorld = () => {
+    try { cityFlightPack.clearCity(); cityFlightPack.clearMountains(); }
+    catch (error) { console.warn('[Course Start Mode cleanup]', error); }
+    applyCourseModeUI('normal');
+  };
+  applyCourseModeUI('normal', false);
 
   function status(message, bad = false) {
     statusEl.textContent = message;
@@ -1386,7 +1407,7 @@ export function installCoasterExpansion(api, helpers) {
   mountNativeUI();
 
   api.expansion={
-    version:'10.0',models,architecture:architecturePack,cityFlight:cityFlightPack,
+    version:'10.1',models,architecture:architecturePack,cityFlight:cityFlightPack,
     exportGLB:async()=>{
       if(typeof api.createTrackExportGroup!=='function')throw new Error('GLB出力APIがありません');
       const built=api.createTrackExportGroup(editor.design);
@@ -1398,7 +1419,7 @@ export function installCoasterExpansion(api, helpers) {
       architecturePack.destroy();
       cityFlightPack.destroy();
       editor.go = originalEditorGoForMountain;
-      mountainBar.remove(); mountainStyle.remove(); startPicker.remove(); startPickerStyle.remove(); delete window.__coasterShowStartModePicker; delete window.__coasterHideStartModePicker; delete window.__coasterCreateStartDesign; delete window.__coasterAfterStartMode; delete window.__coasterClearStartModeWorld;
+      mountainBar.remove(); mountainStyle.remove(); startModeMenu.remove(); startModeStyle.remove(); delete document.body.dataset.coasterCourseMode; delete window.__coasterCreateStartDesign; delete window.__coasterAfterStartMode; delete window.__coasterClearStartModeWorld;
       rideDeck.remove();
       dock.remove();style.remove();editor.onChange=oldOnChange;
       editor.buildTools=originalBuildToolsForDestroy;

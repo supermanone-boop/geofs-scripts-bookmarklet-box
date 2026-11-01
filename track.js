@@ -75,7 +75,7 @@ export const GIMMICKS = {
   jump: { name: 'ジャンプ', len: 14, cost: 300, color: '#a14aff' },
 };
 export const GIMMICK_KEYS = Object.keys(GIMMICKS);
-export const MAX_GIMMICKS = 8;
+export const MAX_GIMMICKS = 128; // v10.1: 仕掛けは最大128個
 export const BUDGET = 10000; // 予算（万円）。0.1.10 で上限としては使わなくなった（結果の画面の「建設費」の目安だけ）
 export const MAX_LEN = 5000; // 拡張版：最大 5 km。極端な負荷を避けるため、無制限にはしない
 export const BASE_COST = 1000; // 駅と車両の基本（万円）

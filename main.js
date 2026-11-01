@@ -1535,6 +1535,7 @@ document.getElementById('btn-new').addEventListener('click', () => {
   history.replaceState(null, '', location.pathname);
   editor.setIncidents([]);
   openEditor(newDesign(cleanMap(co?.design.map)), 1);
+  if (typeof window.__coasterAfterStartMode === 'function') window.__coasterAfterStartMode('normal');
 });
 document.getElementById('btn-totitle').addEventListener('click', () => {
   sound.sfx('tap');
